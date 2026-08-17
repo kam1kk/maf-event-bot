@@ -3,3 +3,4 @@ SQLAlchemy>=2.0
 aiosqlite>=0.20
 APScheduler>=3.10
 python-dotenv>=1.0
+tzlocal>=5.0

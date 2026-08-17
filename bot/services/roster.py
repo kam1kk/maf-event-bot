@@ -23,7 +23,10 @@ async def refresh_event_message(bot: Bot, event_id: int) -> None:
             return
         regs = await repo.get_regs(event_id)
         text = render_event(event, regs)
-        keyboard = event_keyboard(event.id) if event.status == "active" else None
+        keyboard = None
+        if event.status == "active":
+            has_guests = any(r.user_id is None for r in regs)
+            keyboard = event_keyboard(event.id, has_guests)
         try:
             await bot.edit_message_text(
                 text,

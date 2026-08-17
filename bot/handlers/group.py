@@ -46,6 +46,39 @@ async def cb_register_timed(callback: CallbackQuery, bot: Bot) -> None:
     await callback.answer(url=f"https://t.me/{me.username}?start=time_{event_id}")
 
 
+@router.callback_query(F.data.startswith("friend:"))
+async def cb_add_friend(callback: CallbackQuery, bot: Bot) -> None:
+    """Запись друга: нужен ввод ника, поэтому всегда через личку."""
+    event_id = int(callback.data.split(":")[1])
+    event = await repo.get_event(event_id)
+    if not event or event.status != "active":
+        await callback.answer("Запись закрыта", show_alert=True)
+        return
+    me = await bot.get_me()
+    await callback.answer(url=f"https://t.me/{me.username}?start=friend_{event_id}")
+
+
+@router.callback_query(F.data.startswith("unfriend:"))
+async def cb_remove_friend(callback: CallbackQuery, bot: Bot) -> None:
+    event_id = int(callback.data.split(":")[1])
+    event = await repo.get_event(event_id)
+    if not event or event.status != "active":
+        await callback.answer("Запись закрыта", show_alert=True)
+        return
+    guests = await repo.get_guest_regs(event_id, callback.from_user.id)
+    if not guests:
+        await callback.answer("Вы не записывали друзей на это мероприятие", show_alert=True)
+        return
+    if len(guests) == 1:
+        await repo.delete_reg(guests[0].id)
+        await roster.refresh_event_message(bot, event_id)
+        await callback.answer(f"Выписан: {guests[0].nick} ✅")
+        return
+    # друзей несколько — выбор в личке
+    me = await bot.get_me()
+    await callback.answer(url=f"https://t.me/{me.username}?start=unfriend_{event_id}")
+
+
 @router.callback_query(F.data.startswith("unreg:"))
 async def cb_unregister(callback: CallbackQuery, bot: Bot) -> None:
     event_id = int(callback.data.split(":")[1])

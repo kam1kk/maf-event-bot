@@ -33,6 +33,15 @@ class RegTimeForm(StatesGroup):
     leave = State()
 
 
+class FriendForm(StatesGroup):
+    nick = State()
+
+
+def _owns_reg(reg, user_id: int) -> bool:
+    """Своя запись или гость, которого этот пользователь добавил."""
+    return reg.user_id == user_id or (reg.user_id is None and reg.added_by == user_id)
+
+
 async def _ask_nick(
     message: Message, state: FSMContext, reg_event_id: int | None, time_flow: bool = False
 ) -> None:
@@ -102,6 +111,40 @@ async def cmd_start_deeplink(message: Message, command: CommandObject, state: FS
             await _ask_nick(message, state, event_id, time_flow=True)
         return
 
+    if args.startswith("friend_"):
+        try:
+            event_id = int(args[7:])
+        except ValueError:
+            await message.answer(WELCOME)
+            return
+        event = await repo.get_event(event_id)
+        if not event or event.status != "active":
+            await message.answer("Запись на это мероприятие закрыта.")
+            return
+        await state.set_state(FriendForm.nick)
+        await state.update_data(friend_event_id=event_id)
+        await message.answer(
+            "Введите ник друга, которого записываете:",
+            reply_markup=kb.cancel_friend_keyboard(),
+        )
+        return
+
+    if args.startswith("unfriend_"):
+        try:
+            event_id = int(args[9:])
+        except ValueError:
+            await message.answer(WELCOME)
+            return
+        guests = await repo.get_guest_regs(event_id, message.from_user.id)
+        if not guests:
+            await message.answer("Вы не записывали друзей на это мероприятие.")
+            return
+        await message.answer(
+            "Кого из друзей выписать?",
+            reply_markup=kb.unfriend_keyboard(event_id, guests),
+        )
+        return
+
     if args.startswith("mng_"):
         # запасной вход в меню управления, если личка была закрыта
         from bot.handlers.edit import send_manage_menu
@@ -163,6 +206,59 @@ async def input_nick(message: Message, state: FSMContext, bot: Bot) -> None:
         await message.answer(f"Ник сохранён: <b>{escape(nick)}</b> ✅")
 
 
+@router.message(FriendForm.nick, F.text)
+async def input_friend_nick(message: Message, state: FSMContext, bot: Bot) -> None:
+    nick = clean_nick(message.text)
+    if not nick:
+        await message.answer(
+            "Ник должен быть не длиннее 32 символов. Попробуйте ещё раз:",
+            reply_markup=kb.cancel_friend_keyboard(),
+        )
+        return
+    data = await state.get_data()
+    await state.clear()
+    event_id = data["friend_event_id"]
+    event = await repo.get_event(event_id)
+    if not event or event.status != "active":
+        await message.answer("Запись на это мероприятие уже закрыта.")
+        return
+    reg = await repo.add_reg(event_id, None, message.from_user.id, nick)
+    await roster.refresh_event_message(bot, event_id)
+    await message.answer(
+        f"Друг <b>{escape(nick)}</b> записан ✅\n\n{render_summary(event)}\n\n"
+        f"Можно сразу указать время:",
+        reply_markup=kb.my_reg_menu_keyboard(reg),
+    )
+
+
+@router.callback_query(F.data == "frx")
+async def cb_friend_cancel(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    await callback.message.edit_text("Запись друга отменена.")
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("unfr:"))
+async def cb_unfriend_pick(callback: CallbackQuery, bot: Bot) -> None:
+    _, event_id_raw, reg_id_raw = callback.data.split(":")
+    event_id, reg_id = int(event_id_raw), int(reg_id_raw)
+    reg = await repo.get_reg_by_id(reg_id)
+    if not reg or reg.user_id is not None or reg.added_by != callback.from_user.id:
+        await callback.answer("Запись не найдена", show_alert=True)
+        return
+    await repo.delete_reg(reg_id)
+    await roster.refresh_event_message(bot, event_id)
+    guests = await repo.get_guest_regs(event_id, callback.from_user.id)
+    if guests:
+        await callback.message.edit_text(
+            f"Выписан: <b>{escape(reg.nick)}</b> ✅\n\nКого из друзей выписать?",
+            reply_markup=kb.unfriend_keyboard(event_id, guests),
+        )
+    else:
+        await callback.message.edit_text(f"Выписан: <b>{escape(reg.nick)}</b> ✅")
+    await callback.answer()
+
+
 # ---------- мои записи ----------
 
 @router.message(Command("my"))
@@ -181,15 +277,20 @@ async def cb_my_reg(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     reg_id = int(callback.data.split(":")[1])
     reg = await repo.get_reg_by_id(reg_id)
-    if not reg or reg.user_id != callback.from_user.id:
+    if not reg or not _owns_reg(reg, callback.from_user.id):
         await callback.answer("Запись не найдена", show_alert=True)
         return
     event = await repo.get_event(reg.event_id)
     if not event or event.status != "active":
         await callback.answer("Запись на это мероприятие уже закрыта", show_alert=True)
         return
+    who = (
+        f"Ваш друг: <b>{escape(reg.nick)}</b>"
+        if reg.user_id is None
+        else f"Вы записаны как <b>{escape(reg.nick)}</b>"
+    )
     await callback.message.edit_text(
-        f"{render_summary(event)}\n\nВы записаны как <b>{escape(reg.nick)}</b>. Что сделать?",
+        f"{render_summary(event)}\n\n{who}. Что сделать?",
         reply_markup=kb.my_reg_menu_keyboard(reg),
     )
     await callback.answer()
@@ -212,7 +313,7 @@ async def cb_my_action(callback: CallbackQuery, state: FSMContext, bot: Bot) -> 
     _, reg_id_raw, action = callback.data.split(":")
     reg_id = int(reg_id_raw)
     reg = await repo.get_reg_by_id(reg_id)
-    if not reg or reg.user_id != callback.from_user.id:
+    if not reg or not _owns_reg(reg, callback.from_user.id):
         await callback.answer("Запись не найдена", show_alert=True)
         return
     event = await repo.get_event(reg.event_id)
@@ -237,11 +338,14 @@ async def cb_my_action(callback: CallbackQuery, state: FSMContext, bot: Bot) -> 
     elif action == "reset":
         await repo.update_reg(reg_id, category="main", arrive_time=None, leave_time=None)
         await roster.refresh_event_message(bot, event.id)
-        await callback.message.edit_text("Время сброшено — вы в основном составе ✅")
+        note = "Время сброшено — запись в основном составе ✅" if reg.user_id is None \
+            else "Время сброшено — вы в основном составе ✅"
+        await callback.message.edit_text(note)
     elif action == "unreg":
         await repo.delete_reg(reg_id)
         await roster.refresh_event_message(bot, event.id)
-        await callback.message.edit_text("Вы выписаны 🚪")
+        note = f"Друг <b>{escape(reg.nick)}</b> выписан 🚪" if reg.user_id is None else "Вы выписаны 🚪"
+        await callback.message.edit_text(note)
     await callback.answer()
 
 
@@ -256,10 +360,12 @@ async def input_arrive(message: Message, state: FSMContext, bot: Bot) -> None:
     reg = await repo.update_reg(data["reg_id"], category="late", arrive_time=t)
     if reg:
         await roster.refresh_event_message(bot, reg.event_id)
-        await message.answer(
-            f"Отметил: придёте к {message.text.strip()} — вы в списке «Опоздавшие» ✅",
-            reply_markup=kb.my_reg_menu_keyboard(reg),
+        note = (
+            f"Отметил: <b>{escape(reg.nick)}</b> придёт к {message.text.strip()} — запись в списке «Опоздавшие» ✅"
+            if reg.user_id is None
+            else f"Отметил: придёте к {message.text.strip()} — вы в списке «Опоздавшие» ✅"
         )
+        await message.answer(note, reply_markup=kb.my_reg_menu_keyboard(reg))
 
 
 @router.message(RegTimeForm.leave, F.text)
@@ -273,7 +379,9 @@ async def input_leave(message: Message, state: FSMContext, bot: Bot) -> None:
     reg = await repo.update_reg(data["reg_id"], leave_time=t)
     if reg:
         await roster.refresh_event_message(bot, reg.event_id)
-        await message.answer(
-            f"Отметил: будете до {message.text.strip()} ✅",
-            reply_markup=kb.my_reg_menu_keyboard(reg),
+        note = (
+            f"Отметил: <b>{escape(reg.nick)}</b> будет до {message.text.strip()} ✅"
+            if reg.user_id is None
+            else f"Отметил: будете до {message.text.strip()} ✅"
         )
+        await message.answer(note, reply_markup=kb.my_reg_menu_keyboard(reg))

@@ -1,4 +1,4 @@
-from sqlalchemy import delete, select
+from sqlalchemy import and_, delete, or_, select
 
 from bot.db import models
 from bot.db.models import Event, EventType, Registration, User
@@ -159,8 +159,33 @@ async def get_reg_by_id(reg_id: int) -> Registration | None:
         return await s.get(Registration, reg_id)
 
 
+async def get_guest_regs(event_id: int, added_by: int) -> list[Registration]:
+    """Друзья (гости), записанные данным пользователем на мероприятие."""
+    async with S() as s:
+        result = await s.execute(
+            select(Registration)
+            .where(
+                Registration.event_id == event_id,
+                Registration.user_id.is_(None),
+                Registration.added_by == added_by,
+            )
+            .order_by(Registration.id)
+        )
+        return list(result.scalars().all())
+
+
+async def event_has_guests(event_id: int) -> bool:
+    async with S() as s:
+        result = await s.execute(
+            select(Registration.id).where(
+                Registration.event_id == event_id, Registration.user_id.is_(None)
+            ).limit(1)
+        )
+        return result.first() is not None
+
+
 async def add_reg(
-    event_id: int, user_id: int, added_by: int, nick: str, username: str | None = None
+    event_id: int, user_id: int | None, added_by: int, nick: str, username: str | None = None
 ) -> Registration:
     async with S() as s:
         reg = Registration(
@@ -193,7 +218,13 @@ async def list_user_regs_on_active(user_id: int) -> list[tuple[Registration, Eve
         result = await s.execute(
             select(Registration, Event)
             .join(Event, Registration.event_id == Event.id)
-            .where(Registration.user_id == user_id, Event.status == "active")
+            .where(
+                Event.status == "active",
+                or_(
+                    Registration.user_id == user_id,
+                    and_(Registration.user_id.is_(None), Registration.added_by == user_id),
+                ),
+            )
             .order_by(Event.date_, Event.time_)
         )
         return [(row[0], row[1]) for row in result.all()]
