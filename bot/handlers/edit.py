@@ -1,0 +1,213 @@
+from datetime import timedelta
+from html import escape
+
+from aiogram import Bot, F, Router
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import CallbackQuery, Message
+
+from bot import keyboards as kb
+from bot.db import repo
+from bot.services import roster, scheduler
+from bot.services.render import render_summary
+from bot.utils import fmt_date, fmt_time, parse_date, parse_time, today
+
+router = Router()
+
+
+class EditForm(StatesGroup):
+    date_manual = State()
+    time_ = State()
+    place = State()
+    host = State()
+
+
+async def send_manage_menu(bot: Bot, user_id: int, event_id: int) -> bool:
+    event = await repo.get_event(event_id)
+    if not event:
+        return False
+    if user_id != event.creator_id:
+        return False
+    try:
+        await bot.send_message(
+            user_id,
+            f"Управление мероприятием:\n\n{render_summary(event)}",
+            reply_markup=kb.manage_keyboard(event),
+        )
+        return True
+    except Exception:
+        return False
+
+
+@router.callback_query(F.data.startswith("manage:"))
+async def cb_manage(callback: CallbackQuery, bot: Bot) -> None:
+    event_id = int(callback.data.split(":")[1])
+    event = await repo.get_event(event_id)
+    if not event:
+        await callback.answer("Мероприятие не найдено", show_alert=True)
+        return
+    if callback.from_user.id != event.creator_id:
+        await callback.answer("Управлять мероприятием может только его создатель", show_alert=True)
+        return
+    if event.status != "active":
+        await callback.answer("Мероприятие уже завершено", show_alert=True)
+        return
+    if await send_manage_menu(bot, callback.from_user.id, event_id):
+        await callback.answer("Меню управления отправлено вам в личку")
+    else:
+        # личка с ботом закрыта — даём deep-link
+        me = await bot.get_me()
+        await callback.answer(url=f"https://t.me/{me.username}?start=mng_{event_id}")
+
+
+async def _after_edit(bot: Bot, message: Message, event_id: int, note: str) -> None:
+    event = await repo.get_event(event_id)
+    await roster.refresh_event_message(bot, event_id)
+    scheduler.reschedule(event)
+    await message.answer(
+        f"{note}\n\n{render_summary(event)}",
+        reply_markup=kb.manage_keyboard(event),
+    )
+
+
+@router.callback_query(F.data.startswith("mng:"))
+async def cb_manage_action(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
+    _, event_id_raw, action = callback.data.split(":")
+    event_id = int(event_id_raw)
+    event = await repo.get_event(event_id)
+    if not event:
+        await callback.answer("Мероприятие не найдено", show_alert=True)
+        return
+    if callback.from_user.id != event.creator_id:
+        await callback.answer("Только создатель", show_alert=True)
+        return
+    if event.status != "active" and action != "close":
+        await callback.answer("Мероприятие уже завершено", show_alert=True)
+        return
+
+    if action == "date":
+        await state.clear()
+        await state.update_data(event_id=event_id)
+        await callback.message.edit_text("Новая дата:", reply_markup=kb.date_keyboard(f"ed:{event_id}"))
+    elif action == "time":
+        await state.set_state(EditForm.time_)
+        await state.update_data(event_id=event_id)
+        await callback.message.edit_text("Введите новое время начала (например, 19:00):")
+    elif action == "place":
+        await state.set_state(EditForm.place)
+        await state.update_data(event_id=event_id)
+        await callback.message.edit_text("Введите новое место проведения:")
+    elif action == "host":
+        await state.set_state(EditForm.host)
+        await state.update_data(event_id=event_id)
+        await callback.message.edit_text("Введите нового ведущего:")
+    elif action == "remind":
+        event = await repo.update_event(event_id, remind_enabled=not event.remind_enabled)
+        scheduler.reschedule(event)
+        await callback.message.edit_reply_markup(reply_markup=kb.manage_keyboard(event))
+    elif action == "cancel":
+        await callback.message.edit_text(
+            "Точно отменить стол? Запись закроется, в сообщении появится «Стол отменен».",
+            reply_markup=kb.cancel_confirm_keyboard(event_id),
+        )
+    elif action == "close":
+        await callback.message.edit_text("Готово ✔")
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("ed:"))
+async def cb_edit_date(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
+    _, event_id_raw, choice = callback.data.split(":")
+    event_id = int(event_id_raw)
+    event = await repo.get_event(event_id)
+    if not event or callback.from_user.id != event.creator_id:
+        await callback.answer("Недоступно", show_alert=True)
+        return
+
+    if choice == "manual":
+        await state.set_state(EditForm.date_manual)
+        await state.update_data(event_id=event_id)
+        await callback.message.edit_text("Введите дату в формате <b>ДД.ММ</b> или <b>ДД.ММ.ГГГГ</b>:")
+        await callback.answer()
+        return
+
+    new_date = today() if choice == "today" else today() + timedelta(days=1)
+    await repo.update_event(event_id, date_=new_date)
+    await state.clear()
+    await _after_edit(bot, callback.message, event_id, f"Дата изменена: <b>{fmt_date(new_date)}</b> ✅")
+    await callback.answer()
+
+
+@router.message(EditForm.date_manual, F.text, F.chat.type == "private")
+async def input_edit_date(message: Message, state: FSMContext, bot: Bot) -> None:
+    new_date = parse_date(message.text)
+    if not new_date:
+        await message.answer("Не понял дату. Формат: <b>ДД.ММ</b> или <b>ДД.ММ.ГГГГ</b>")
+        return
+    if new_date < today():
+        await message.answer("Эта дата уже прошла. Введите будущую дату:")
+        return
+    data = await state.get_data()
+    await state.clear()
+    await repo.update_event(data["event_id"], date_=new_date)
+    await _after_edit(bot, message, data["event_id"], f"Дата изменена: <b>{fmt_date(new_date)}</b> ✅")
+
+
+@router.message(EditForm.time_, F.text, F.chat.type == "private")
+async def input_edit_time(message: Message, state: FSMContext, bot: Bot) -> None:
+    new_time = parse_time(message.text)
+    if not new_time:
+        await message.answer("Не понял время. Формат: <b>ЧЧ:ММ</b>, например 19:00")
+        return
+    data = await state.get_data()
+    await state.clear()
+    await repo.update_event(data["event_id"], time_=new_time)
+    await _after_edit(bot, message, data["event_id"], f"Время изменено: <b>{fmt_time(new_time)}</b> ✅")
+
+
+@router.message(EditForm.place, F.text, F.chat.type == "private")
+async def input_edit_place(message: Message, state: FSMContext, bot: Bot) -> None:
+    place = message.text.strip()
+    if not place or len(place) > 128:
+        await message.answer("Слишком длинно (максимум 128 символов). Введите место:")
+        return
+    data = await state.get_data()
+    await state.clear()
+    await repo.update_event(data["event_id"], place=place)
+    await _after_edit(bot, message, data["event_id"], f"Место изменено: <b>{escape(place)}</b> ✅")
+
+
+@router.message(EditForm.host, F.text, F.chat.type == "private")
+async def input_edit_host(message: Message, state: FSMContext, bot: Bot) -> None:
+    host = message.text.strip()
+    if not host or len(host) > 64:
+        await message.answer("Слишком длинно (максимум 64 символа). Введите ведущего:")
+        return
+    data = await state.get_data()
+    await state.clear()
+    await repo.update_event(data["event_id"], host=host)
+    await _after_edit(bot, message, data["event_id"], f"Ведущий изменён: <b>{escape(host)}</b> ✅")
+
+
+@router.callback_query(F.data.startswith("mngc:"))
+async def cb_cancel_confirm(callback: CallbackQuery, bot: Bot) -> None:
+    _, event_id_raw, choice = callback.data.split(":")
+    event_id = int(event_id_raw)
+    event = await repo.get_event(event_id)
+    if not event or callback.from_user.id != event.creator_id:
+        await callback.answer("Недоступно", show_alert=True)
+        return
+
+    if choice == "no":
+        await callback.message.edit_text(
+            f"Управление мероприятием:\n\n{render_summary(event)}",
+            reply_markup=kb.manage_keyboard(event),
+        )
+        await callback.answer()
+        return
+
+    event = await repo.update_event(event_id, status="cancelled")
+    scheduler.cancel_event_jobs(event_id)
+    await roster.refresh_event_message(bot, event_id)
+    await callback.message.edit_text("Стол отменен ❌")
+    await callback.answer()
