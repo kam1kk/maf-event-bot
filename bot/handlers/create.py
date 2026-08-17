@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import datetime, timedelta
 from html import escape
 
 from aiogram import Bot, F, Router
@@ -9,15 +9,16 @@ from aiogram.types import CallbackQuery, LinkPreviewOptions, Message
 
 from bot import keyboards as kb
 from bot.db import repo
-from bot.services import scheduler
+from bot.services import membership, scheduler
 from bot.services.render import render_event
-from bot.utils import fmt_date, fmt_time, parse_date, parse_time, today
+from bot.utils import fmt_date, fmt_time, parse_date, parse_time
 
 router = Router()
 router.message.filter(F.chat.type == "private")
 
 
 class CreateForm(StatesGroup):
+    group_ = State()
     type_ = State()
     date_ = State()
     date_manual = State()
@@ -25,6 +26,27 @@ class CreateForm(StatesGroup):
     place = State()
     host = State()
     confirm = State()
+
+
+async def _group_today(state: FSMContext):
+    data = await state.get_data()
+    tz = await repo.group_tz(data.get("group_chat_id"))
+    return datetime.now(tz).date()
+
+
+async def _show_types(target: Message, state: FSMContext, group_chat_id: int, edit: bool) -> None:
+    types = await repo.list_types(group_chat_id)
+    if not types:
+        await repo.ensure_default_type(group_chat_id)
+        types = await repo.list_types(group_chat_id)
+    await state.update_data(group_chat_id=group_chat_id)
+    await state.set_state(CreateForm.type_)
+    text = "Выберите тип мероприятия:"
+    markup = kb.types_keyboard(types)
+    if edit:
+        await target.edit_text(text, reply_markup=markup)
+    else:
+        await target.answer(text, reply_markup=markup)
 
 
 def _preview_text(data: dict) -> str:
@@ -38,19 +60,39 @@ def _preview_text(data: dict) -> str:
 
 
 @router.message(Command("new"))
-async def cmd_new(message: Message, state: FSMContext) -> None:
+async def cmd_new(message: Message, state: FSMContext, bot: Bot) -> None:
     await state.clear()
     await repo.get_or_create_user(message.from_user.id)
-    types = await repo.list_types()
-    await state.set_state(CreateForm.type_)
-    await message.answer("Выберите тип мероприятия:", reply_markup=kb.types_keyboard(types))
+    groups = await membership.user_groups(bot, message.from_user.id)
+    if not groups:
+        await message.answer(
+            "Я не вижу вас ни в одной группе, где я работаю. "
+            "Убедитесь, что вы состоите в группе и бот туда добавлен."
+        )
+        return
+    if len(groups) == 1:
+        await _show_types(message, state, groups[0].chat_id, edit=False)
+        return
+    await state.set_state(CreateForm.group_)
+    await message.answer(
+        "Для какой группы создаём мероприятие?",
+        reply_markup=kb.group_picker_keyboard(groups, "cg"),
+    )
+
+
+@router.callback_query(CreateForm.group_, F.data.startswith("cg:"))
+async def cb_group(callback: CallbackQuery, state: FSMContext) -> None:
+    group_chat_id = int(callback.data.split(":")[1])
+    await _show_types(callback.message, state, group_chat_id, edit=True)
+    await callback.answer()
 
 
 @router.callback_query(CreateForm.type_, F.data.startswith("ct:"))
 async def cb_type(callback: CallbackQuery, state: FSMContext) -> None:
     type_id = int(callback.data.split(":")[1])
     event_type = await repo.get_type(type_id)
-    if not event_type:
+    data = await state.get_data()
+    if not event_type or event_type.group_chat_id != data.get("group_chat_id"):
         await callback.answer("Тип не найден", show_alert=True)
         return
     if not event_type.chat_id:
@@ -80,7 +122,8 @@ async def cb_date(callback: CallbackQuery, state: FSMContext) -> None:
         )
         await callback.answer()
         return
-    event_date = today() if choice == "today" else today() + timedelta(days=1)
+    base = await _group_today(state)
+    event_date = base if choice == "today" else base + timedelta(days=1)
     await state.update_data(date=event_date.isoformat(), date_str=fmt_date(event_date))
     await state.set_state(CreateForm.time_)
     await callback.message.edit_text(
@@ -92,11 +135,12 @@ async def cb_date(callback: CallbackQuery, state: FSMContext) -> None:
 
 @router.message(CreateForm.date_manual, F.text)
 async def input_date(message: Message, state: FSMContext) -> None:
-    event_date = parse_date(message.text)
+    base = await _group_today(state)
+    event_date = parse_date(message.text, base)
     if not event_date:
         await message.answer("Не понял дату. Формат: <b>ДД.ММ</b> или <b>ДД.ММ.ГГГГ</b>, например 15.08")
         return
-    if event_date < today():
+    if event_date < base:
         await message.answer("Эта дата уже прошла. Введите будущую дату:")
         return
     await state.update_data(date=event_date.isoformat(), date_str=fmt_date(event_date))
@@ -186,7 +230,7 @@ async def cb_publish(callback: CallbackQuery, state: FSMContext, bot: Bot) -> No
         return
 
     event = await repo.update_event(event.id, message_id=posted.message_id)
-    scheduler.schedule_event_jobs(event)
+    await scheduler.schedule_event_jobs(event)
     await state.clear()
     await callback.message.edit_text("Мероприятие опубликовано ✅\nУправление — кнопка «⚙ Управление» под списком.")
     await callback.answer()

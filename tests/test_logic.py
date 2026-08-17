@@ -13,15 +13,33 @@ def test_smoke(tmp_path):
     from bot.services.render import render_event
     from bot.utils import parse_date, parse_time, today
 
+    GROUP = -1001234567890
+
     async def run():
         await init_db()
-        await repo.ensure_default_type("Мафия")
+        await repo.ensure_group(GROUP, "Тестовая группа")
+        await repo.ensure_default_type(GROUP)
 
-        types = await repo.list_types()
+        types = await repo.list_types(GROUP)
         assert types[0].name == "Мафия" and types[0].is_default
-        await repo.bind_type_topic(types[0].id, -1001234567890, 42)
-        et = await repo.get_type_by_name("мафия")
+        await repo.bind_type_topic(types[0].id, GROUP, 42)
+        et = await repo.get_type_by_name(GROUP, "мафия")
         assert et and et.topic_id == 42
+
+        # типы изолированы по группам, одноимённые не конфликтуют
+        OTHER = -1009999999999
+        await repo.ensure_group(OTHER, "Другая группа")
+        await repo.ensure_default_type(OTHER)
+        assert await repo.add_type(OTHER, "Турнир") is not None
+        assert await repo.get_type_by_name(GROUP, "Турнир") is None
+        assert len(await repo.list_types(OTHER)) == 2
+
+        # часовой пояс: без настройки — фолбэк, с настройкой — свой
+        from bot.config import get_tz
+        assert str(await repo.group_tz(GROUP)) == str(get_tz())
+        await repo.set_group_timezone(GROUP, "Europe/Moscow")
+        assert str(await repo.group_tz(GROUP)) == "Europe/Moscow"
+        assert str(await repo.group_tz(OTHER)) == str(get_tz())
 
         event = await repo.create_event(
             type_id=et.id, type_name=et.name, date_=date(2030, 8, 15), time_=time(19, 0),

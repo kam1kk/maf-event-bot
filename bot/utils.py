@@ -11,14 +11,15 @@ def today() -> date:
     return datetime.now(get_tz()).date()
 
 
-def parse_date(text: str) -> date | None:
-    """Разбирает '13.08', '13.08.2026', '13/08' и т.п."""
+def parse_date(text: str, base: date | None = None) -> date | None:
+    """Разбирает '13.08', '13.08.2026', '13/08' и т.п.
+    base — «сегодня» в часовом поясе группы (для года по умолчанию)."""
     m = DATE_RE.fullmatch(text.strip())
     if not m:
         return None
     day, month = int(m.group(1)), int(m.group(2))
     year_raw = m.group(3)
-    now = today()
+    now = base or today()
     if year_raw:
         year = int(year_raw)
         if year < 100:

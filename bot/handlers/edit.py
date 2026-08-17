@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import datetime, timedelta
 from html import escape
 
 from aiogram import Bot, F, Router
@@ -10,7 +10,7 @@ from bot import keyboards as kb
 from bot.db import repo
 from bot.services import roster, scheduler
 from bot.services.render import render_summary
-from bot.utils import fmt_date, fmt_time, parse_date, parse_time, today
+from bot.utils import fmt_date, fmt_time, parse_date, parse_time
 
 router = Router()
 
@@ -63,7 +63,7 @@ async def cb_manage(callback: CallbackQuery, bot: Bot) -> None:
 async def _after_edit(bot: Bot, message: Message, event_id: int, note: str) -> None:
     event = await repo.get_event(event_id)
     await roster.refresh_event_message(bot, event_id)
-    scheduler.reschedule(event)
+    await scheduler.reschedule(event)
     await message.answer(
         f"{note}\n\n{render_summary(event)}",
         reply_markup=kb.manage_keyboard(event),
@@ -115,7 +115,7 @@ async def cb_manage_action(callback: CallbackQuery, state: FSMContext, bot: Bot)
         )
     elif action == "remind":
         event = await repo.update_event(event_id, remind_enabled=not event.remind_enabled)
-        scheduler.reschedule(event)
+        await scheduler.reschedule(event)
         await callback.message.edit_reply_markup(reply_markup=kb.manage_keyboard(event))
     elif action == "kick":
         regs = await repo.get_regs(event_id)
@@ -162,7 +162,9 @@ async def cb_edit_date(callback: CallbackQuery, state: FSMContext, bot: Bot) -> 
         await callback.answer()
         return
 
-    new_date = today() if choice == "today" else today() + timedelta(days=1)
+    tz = await repo.group_tz(event.chat_id)
+    base = datetime.now(tz).date()
+    new_date = base if choice == "today" else base + timedelta(days=1)
     await repo.update_event(event_id, date_=new_date)
     await state.clear()
     await _after_edit(bot, callback.message, event_id, f"Дата изменена: <b>{fmt_date(new_date)}</b> ✅")
@@ -171,14 +173,17 @@ async def cb_edit_date(callback: CallbackQuery, state: FSMContext, bot: Bot) -> 
 
 @router.message(EditForm.date_manual, F.text, F.chat.type == "private")
 async def input_edit_date(message: Message, state: FSMContext, bot: Bot) -> None:
-    new_date = parse_date(message.text)
+    data = await state.get_data()
+    event = await repo.get_event(data["event_id"])
+    tz = await repo.group_tz(event.chat_id if event else None)
+    base = datetime.now(tz).date()
+    new_date = parse_date(message.text, base)
     if not new_date:
         await message.answer("Не понял дату. Формат: <b>ДД.ММ</b> или <b>ДД.ММ.ГГГГ</b>")
         return
-    if new_date < today():
+    if new_date < base:
         await message.answer("Эта дата уже прошла. Введите будущую дату:")
         return
-    data = await state.get_data()
     await state.clear()
     await repo.update_event(data["event_id"], date_=new_date)
     await _after_edit(bot, message, data["event_id"], f"Дата изменена: <b>{fmt_date(new_date)}</b> ✅")

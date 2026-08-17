@@ -1,11 +1,21 @@
 from aiogram import Bot, F, Router
 from aiogram.filters import Command, CommandObject
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, ChatMemberUpdated, Message
 
 from bot.db import repo
 from bot.services import roster
 
 router = Router()
+
+
+@router.my_chat_member()
+async def on_bot_membership(update: ChatMemberUpdated) -> None:
+    """Бота добавили в группу — регистрируем её и создаём тип по умолчанию."""
+    if update.chat.type not in ("group", "supergroup"):
+        return
+    if update.new_chat_member.status in ("member", "administrator"):
+        await repo.ensure_group(update.chat.id, update.chat.title)
+        await repo.ensure_default_type(update.chat.id)
 
 
 # ---------- кнопки под сообщением мероприятия ----------
@@ -90,13 +100,18 @@ async def cb_unregister(callback: CallbackQuery, bot: Bot) -> None:
 
 @router.message(Command("bind"), F.chat.type.in_({"group", "supergroup"}))
 async def cmd_bind(message: Message, command: CommandObject) -> None:
+    # подстраховка, если бота добавили, пока он был выключен
+    await repo.ensure_group(message.chat.id, message.chat.title)
+    await repo.ensure_default_type(message.chat.id)
     name = (command.args or "").strip()
     if not name:
         await message.reply("Укажите тип: <code>/bind Мафия</code>")
         return
-    event_type = await repo.get_type_by_name(name)
+    event_type = await repo.get_type_by_name(message.chat.id, name)
     if not event_type:
-        await message.reply(f"Тип «{name}» не найден. Список типов и добавление — /settings в личке с ботом.")
+        await message.reply(
+            f"Тип «{name}» не найден в этой группе. Список типов и добавление — /settings в личке с ботом."
+        )
         return
     await repo.bind_type_topic(event_type.id, message.chat.id, message.message_thread_id)
     await message.reply(f"Готово ✅ Мероприятия «{event_type.name}» будут публиковаться в этой теме.")
@@ -104,13 +119,17 @@ async def cmd_bind(message: Message, command: CommandObject) -> None:
 
 @router.message(Command("bind_remind"), F.chat.type.in_({"group", "supergroup"}))
 async def cmd_bind_remind(message: Message, command: CommandObject) -> None:
+    await repo.ensure_group(message.chat.id, message.chat.title)
+    await repo.ensure_default_type(message.chat.id)
     name = (command.args or "").strip()
     if not name:
         await message.reply("Укажите тип: <code>/bind_remind Мафия</code>")
         return
-    event_type = await repo.get_type_by_name(name)
+    event_type = await repo.get_type_by_name(message.chat.id, name)
     if not event_type:
-        await message.reply(f"Тип «{name}» не найден. Список типов и добавление — /settings в личке с ботом.")
+        await message.reply(
+            f"Тип «{name}» не найден в этой группе. Список типов и добавление — /settings в личке с ботом."
+        )
         return
     await repo.bind_type_remind(event_type.id, message.chat.id, message.message_thread_id)
     await message.reply(f"Готово ✅ Напоминания «{event_type.name}» будут приходить в эту тему.")
