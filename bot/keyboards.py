@@ -170,11 +170,30 @@ def cancel_friend_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
-def settings_keyboard(chat_id: int) -> InlineKeyboardMarkup:
+def settings_keyboard(group: Group) -> InlineKeyboardMarkup:
+    chat_id = group.chat_id
+    mode_label = (
+        "🎛 Создание: только админы" if group.only_admins_create else "🎛 Создание: все участники"
+    )
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="➕ Добавить тип мероприятия", callback_data=f"st:add:{chat_id}")],
         [InlineKeyboardButton(text="🌍 Часовой пояс", callback_data=f"st:tz:{chat_id}")],
+        [InlineKeyboardButton(text=mode_label, callback_data=f"st:mode:{chat_id}")],
+        [InlineKeyboardButton(text="👮 Админы бота", callback_data=f"st:adm:{chat_id}")],
     ])
+
+
+def admins_keyboard(chat_id: int, admins: list) -> InlineKeyboardMarkup:
+    """admins: list[GroupAdmin]"""
+    rows = [
+        [InlineKeyboardButton(
+            text=f"✖ {admin.name or admin.user_id}",
+            callback_data=f"unadm:{chat_id}:{admin.user_id}",
+        )]
+        for admin in admins
+    ]
+    rows.append([InlineKeyboardButton(text="« Назад", callback_data=f"sg:{chat_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 TZ_CHOICES = [

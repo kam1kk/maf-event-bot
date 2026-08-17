@@ -3,7 +3,7 @@ from aiogram.filters import Command, CommandObject
 from aiogram.types import CallbackQuery, ChatMemberUpdated, Message
 
 from bot.db import repo
-from bot.services import roster
+from bot.services import membership, roster
 
 router = Router()
 
@@ -94,6 +94,52 @@ async def cb_unregister(callback: CallbackQuery, bot: Bot) -> None:
     event_id = int(callback.data.split(":")[1])
     ok, text = await roster.unregister(bot, event_id, callback.from_user.id)
     await callback.answer(text, show_alert=not ok)
+
+
+# ---------- права админов бота ----------
+
+@router.message(Command("promote"), F.chat.type.in_({"group", "supergroup"}))
+async def cmd_promote(message: Message, bot: Bot) -> None:
+    if not await membership.is_tg_admin(bot, message.chat.id, message.from_user.id):
+        await message.reply("Выдавать права бота могут только администраторы группы.")
+        return
+    target = message.reply_to_message.from_user if message.reply_to_message else None
+    if not target:
+        await message.reply(
+            "Ответьте командой <code>/promote</code> на любое сообщение участника, "
+            "которому выдаёте права админа бота."
+        )
+        return
+    if target.is_bot:
+        await message.reply("Ботам права не нужны.")
+        return
+    if await membership.is_tg_admin(bot, message.chat.id, target.id):
+        await message.reply(f"{target.full_name} — администратор группы, права бота у него уже есть.")
+        return
+    await repo.ensure_group(message.chat.id, message.chat.title)
+    name = target.full_name + (f" (@{target.username})" if target.username else "")
+    if await repo.add_group_admin(message.chat.id, target.id, name, message.from_user.id):
+        await message.reply(f"✅ {target.full_name} теперь админ бота в этой группе.")
+    else:
+        await message.reply(f"{target.full_name} уже админ бота в этой группе.")
+
+
+@router.message(Command("demote"), F.chat.type.in_({"group", "supergroup"}))
+async def cmd_demote(message: Message, bot: Bot) -> None:
+    if not await membership.is_tg_admin(bot, message.chat.id, message.from_user.id):
+        await message.reply("Снимать права бота могут только администраторы группы.")
+        return
+    target = message.reply_to_message.from_user if message.reply_to_message else None
+    if not target:
+        await message.reply(
+            "Ответьте командой <code>/demote</code> на любое сообщение участника, "
+            "у которого снимаете права админа бота."
+        )
+        return
+    if await repo.remove_group_admin(message.chat.id, target.id):
+        await message.reply(f"Права админа бота у {target.full_name} сняты.")
+    else:
+        await message.reply(f"У {target.full_name} нет выданных прав админа бота.")
 
 
 # ---------- привязка тем ----------

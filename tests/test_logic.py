@@ -99,6 +99,22 @@ def test_smoke(tmp_path):
         items = await repo.list_user_regs_on_active(2)
         assert len(items) == 2  # своя запись (Nick2) + гость
 
+        # роли: выданные права админа бота — per-группа
+        assert not await repo.is_group_admin(GROUP, 42)
+        assert await repo.add_group_admin(GROUP, 42, "Вася (@vasya)", 1)
+        assert await repo.is_group_admin(GROUP, 42)
+        assert not await repo.add_group_admin(GROUP, 42, "Вася", 1)  # повторная выдача
+        assert not await repo.is_group_admin(OTHER, 42)  # в другой группе прав нет
+        assert len(await repo.list_group_admins(GROUP)) == 1
+        assert await repo.remove_group_admin(GROUP, 42)
+        assert not await repo.remove_group_admin(GROUP, 42)
+
+        # режим «создавать могут только админы» — per-группа, по умолчанию выключен
+        assert not (await repo.get_group(GROUP)).only_admins_create
+        await repo.set_group_creation_mode(GROUP, True)
+        assert (await repo.get_group(GROUP)).only_admins_create
+        assert not (await repo.get_group(OTHER)).only_admins_create
+
         # настройки: сохранение и перезапись часового пояса
         assert await repo.get_setting("timezone") is None
         await repo.set_setting("timezone", "Asia/Yekaterinburg")

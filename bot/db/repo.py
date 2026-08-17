@@ -4,7 +4,7 @@ from sqlalchemy import and_, delete, or_, select
 
 from bot.config import get_tz
 from bot.db import models
-from bot.db.models import AppSetting, Event, EventType, Group, Registration, User
+from bot.db.models import AppSetting, Event, EventType, Group, GroupAdmin, Registration, User
 
 
 def S():
@@ -68,6 +68,56 @@ async def set_group_timezone(chat_id: int, tz_name: str) -> None:
         if group:
             group.timezone = tz_name
             await s.commit()
+
+
+async def set_group_creation_mode(chat_id: int, only_admins: bool) -> None:
+    async with S() as s:
+        group = await s.get(Group, chat_id)
+        if group:
+            group.only_admins_create = only_admins
+            await s.commit()
+
+
+# ---------- group admins (выданные права бота) ----------
+
+async def is_group_admin(chat_id: int, user_id: int) -> bool:
+    async with S() as s:
+        result = await s.execute(
+            select(GroupAdmin.id).where(
+                GroupAdmin.chat_id == chat_id, GroupAdmin.user_id == user_id
+            ).limit(1)
+        )
+        return result.first() is not None
+
+
+async def add_group_admin(chat_id: int, user_id: int, name: str | None, granted_by: int) -> bool:
+    if await is_group_admin(chat_id, user_id):
+        return False
+    async with S() as s:
+        s.add(GroupAdmin(chat_id=chat_id, user_id=user_id, name=name, granted_by=granted_by))
+        await s.commit()
+        return True
+
+
+async def remove_group_admin(chat_id: int, user_id: int) -> bool:
+    if not await is_group_admin(chat_id, user_id):
+        return False
+    async with S() as s:
+        await s.execute(
+            delete(GroupAdmin).where(
+                GroupAdmin.chat_id == chat_id, GroupAdmin.user_id == user_id
+            )
+        )
+        await s.commit()
+        return True
+
+
+async def list_group_admins(chat_id: int) -> list[GroupAdmin]:
+    async with S() as s:
+        result = await s.execute(
+            select(GroupAdmin).where(GroupAdmin.chat_id == chat_id).order_by(GroupAdmin.id)
+        )
+        return list(result.scalars().all())
 
 
 async def group_tz(chat_id: int | None):
