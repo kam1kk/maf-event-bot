@@ -7,7 +7,14 @@ MIN_SLOTS = 10
 
 
 def reg_line(reg: Registration) -> str:
-    parts = [escape(reg.nick)]
+    name = escape(reg.nick)
+    # ник — ссылка на профиль; уведомлений не порождает, т.к. список попадает
+    # в сообщение только через редактирование
+    if reg.username:
+        name = f'<a href="https://t.me/{reg.username}">{name}</a>'
+    elif reg.user_id:
+        name = f'<a href="tg://user?id={reg.user_id}">{name}</a>'
+    parts = [name]
     if reg.arrive_time:
         parts.append(f"(придёт к {fmt_time(reg.arrive_time)})")
     if reg.leave_time:

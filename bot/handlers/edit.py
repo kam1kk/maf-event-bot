@@ -105,6 +105,20 @@ async def cb_manage_action(callback: CallbackQuery, state: FSMContext, bot: Bot)
         event = await repo.update_event(event_id, remind_enabled=not event.remind_enabled)
         scheduler.reschedule(event)
         await callback.message.edit_reply_markup(reply_markup=kb.manage_keyboard(event))
+    elif action == "kick":
+        regs = await repo.get_regs(event_id)
+        if not regs:
+            await callback.answer("Пока никто не записан", show_alert=True)
+            return
+        await callback.message.edit_text(
+            "Кого выписать? Нажмите на участника:",
+            reply_markup=kb.kick_keyboard(event_id, regs),
+        )
+    elif action == "menu":
+        await callback.message.edit_text(
+            f"Управление мероприятием:\n\n{render_summary(event)}",
+            reply_markup=kb.manage_keyboard(event),
+        )
     elif action == "cancel":
         await callback.message.edit_text(
             "Точно отменить стол? Запись закроется, в сообщении появится «Стол отменен».",
@@ -187,6 +201,39 @@ async def input_edit_host(message: Message, state: FSMContext, bot: Bot) -> None
     await state.clear()
     await repo.update_event(data["event_id"], host=host)
     await _after_edit(bot, message, data["event_id"], f"Ведущий изменён: <b>{escape(host)}</b> ✅")
+
+
+@router.callback_query(F.data.startswith("kick:"))
+async def cb_kick(callback: CallbackQuery, bot: Bot) -> None:
+    _, event_id_raw, reg_id_raw = callback.data.split(":")
+    event_id, reg_id = int(event_id_raw), int(reg_id_raw)
+    event = await repo.get_event(event_id)
+    if not event or callback.from_user.id != event.creator_id:
+        await callback.answer("Недоступно", show_alert=True)
+        return
+    if event.status != "active":
+        await callback.answer("Мероприятие уже завершено", show_alert=True)
+        return
+    reg = await repo.get_reg_by_id(reg_id)
+    if not reg or reg.event_id != event_id:
+        await callback.answer("Запись уже удалена", show_alert=True)
+        return
+
+    await repo.delete_reg(reg_id)
+    await roster.refresh_event_message(bot, event_id)
+    regs = await repo.get_regs(event_id)
+    if regs:
+        await callback.message.edit_text(
+            f"Выписан: <b>{escape(reg.nick)}</b> ✅\n\nКого выписать? Нажмите на участника:",
+            reply_markup=kb.kick_keyboard(event_id, regs),
+        )
+    else:
+        await callback.message.edit_text(
+            f"Выписан: <b>{escape(reg.nick)}</b> ✅\n\nСписок пуст.\n\n"
+            f"Управление мероприятием:\n\n{render_summary(event)}",
+            reply_markup=kb.manage_keyboard(event),
+        )
+    await callback.answer()
 
 
 @router.callback_query(F.data.startswith("mngc:"))
