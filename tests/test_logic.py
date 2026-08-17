@@ -81,6 +81,13 @@ def test_smoke(tmp_path):
         items = await repo.list_user_regs_on_active(2)
         assert len(items) == 2  # своя запись (Nick2) + гость
 
+        # настройки: сохранение и перезапись часового пояса
+        assert await repo.get_setting("timezone") is None
+        await repo.set_setting("timezone", "Asia/Yekaterinburg")
+        assert await repo.get_setting("timezone") == "Asia/Yekaterinburg"
+        await repo.set_setting("timezone", "Europe/Moscow")
+        assert await repo.get_setting("timezone") == "Europe/Moscow"
+
     asyncio.run(run())
 
 

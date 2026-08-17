@@ -5,7 +5,7 @@ from html import escape
 from aiogram import Bot
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from bot.config import TZ
+from bot.config import get_tz
 from bot.db import repo
 from bot.db.models import Event
 from bot.services import roster
@@ -13,7 +13,7 @@ from bot.utils import fmt_time, message_link
 
 logger = logging.getLogger(__name__)
 
-scheduler = AsyncIOScheduler(timezone=TZ)
+scheduler = AsyncIOScheduler(timezone=get_tz())
 
 _bot: Bot | None = None
 
@@ -25,15 +25,15 @@ def setup(bot: Bot) -> None:
 
 def _close_at(event: Event) -> datetime:
     # конец дня проведения: полночь следующего дня
-    return datetime.combine(event.date_ + timedelta(days=1), time(0, 0), tzinfo=TZ)
+    return datetime.combine(event.date_ + timedelta(days=1), time(0, 0), tzinfo=get_tz())
 
 
 def _remind_at(event: Event) -> datetime:
-    return datetime.combine(event.date_, event.time_, tzinfo=TZ) - timedelta(hours=1)
+    return datetime.combine(event.date_, event.time_, tzinfo=get_tz()) - timedelta(hours=1)
 
 
 def schedule_event_jobs(event: Event) -> None:
-    now = datetime.now(TZ)
+    now = datetime.now(get_tz())
     close_at = _close_at(event)
     if close_at > now:
         scheduler.add_job(
@@ -101,7 +101,7 @@ async def send_reminder(event_id: int) -> None:
 async def restore_jobs() -> None:
     """При старте бота восстанавливаем задачи по активным событиям.
     Если время закрытия прошло, пока бот лежал, — закрываем сразу."""
-    now = datetime.now(TZ)
+    now = datetime.now(get_tz())
     for event in await repo.list_active_events():
         if _close_at(event) <= now:
             await close_event(event.id)

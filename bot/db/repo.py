@@ -1,12 +1,30 @@
 from sqlalchemy import and_, delete, or_, select
 
 from bot.db import models
-from bot.db.models import Event, EventType, Registration, User
+from bot.db.models import AppSetting, Event, EventType, Registration, User
 
 
 def S():
     assert models.Session is not None, "init_db() не вызван"
     return models.Session()
+
+
+# ---------- app settings ----------
+
+async def get_setting(key: str) -> str | None:
+    async with S() as s:
+        setting = await s.get(AppSetting, key)
+        return setting.value if setting else None
+
+
+async def set_setting(key: str, value: str) -> None:
+    async with S() as s:
+        setting = await s.get(AppSetting, key)
+        if setting:
+            setting.value = value
+        else:
+            s.add(AppSetting(key=key, value=value))
+        await s.commit()
 
 
 # ---------- users ----------

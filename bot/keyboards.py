@@ -162,4 +162,31 @@ def cancel_friend_keyboard() -> InlineKeyboardMarkup:
 def settings_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="➕ Добавить тип мероприятия", callback_data="st:add")],
+        [InlineKeyboardButton(text="🌍 Часовой пояс", callback_data="st:tz")],
     ])
+
+
+TZ_CHOICES = [
+    ("Калининград +2", "Europe/Kaliningrad"),
+    ("Москва +3", "Europe/Moscow"),
+    ("Самара +4", "Europe/Samara"),
+    ("Екатеринбург +5", "Asia/Yekaterinburg"),
+    ("Омск +6", "Asia/Omsk"),
+    ("Красноярск +7", "Asia/Krasnoyarsk"),
+    ("Иркутск +8", "Asia/Irkutsk"),
+    ("Якутск +9", "Asia/Yakutsk"),
+    ("Владивосток +10", "Asia/Vladivostok"),
+    ("Магадан +11", "Asia/Magadan"),
+    ("Камчатка +12", "Asia/Kamchatka"),
+]
+
+
+def tz_keyboard() -> InlineKeyboardMarkup:
+    rows = []
+    for i in range(0, len(TZ_CHOICES), 2):
+        rows.append([
+            InlineKeyboardButton(text=label, callback_data=f"tzset:{name}")
+            for label, name in TZ_CHOICES[i:i + 2]
+        ])
+    rows.append([InlineKeyboardButton(text="✏ Ввести вручную", callback_data="st:tzmanual")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
