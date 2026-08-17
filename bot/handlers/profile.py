@@ -176,7 +176,9 @@ async def cmd_my(message: Message, state: FSMContext) -> None:
 
 
 @router.callback_query(F.data.startswith("my:"))
-async def cb_my_reg(callback: CallbackQuery) -> None:
+async def cb_my_reg(callback: CallbackQuery, state: FSMContext) -> None:
+    # сюда же ведёт «Назад» из ввода времени — сбрасываем ожидание текста
+    await state.clear()
     reg_id = int(callback.data.split(":")[1])
     reg = await repo.get_reg_by_id(reg_id)
     if not reg or reg.user_id != callback.from_user.id:
@@ -222,13 +224,15 @@ async def cb_my_action(callback: CallbackQuery, state: FSMContext, bot: Bot) -> 
         await state.set_state(RegTimeForm.arrive)
         await state.update_data(reg_id=reg_id)
         await callback.message.edit_text(
-            "К какому времени придёте? Введите время (например, 19:30):"
+            "К какому времени придёте? Введите время (например, 19:30):",
+            reply_markup=kb.back_to_reg_keyboard(reg_id),
         )
     elif action == "leave":
         await state.set_state(RegTimeForm.leave)
         await state.update_data(reg_id=reg_id)
         await callback.message.edit_text(
-            "До какого времени будете? Введите время (например, 21:00):"
+            "До какого времени будете? Введите время (например, 21:00):",
+            reply_markup=kb.back_to_reg_keyboard(reg_id),
         )
     elif action == "reset":
         await repo.update_reg(reg_id, category="main", arrive_time=None, leave_time=None)

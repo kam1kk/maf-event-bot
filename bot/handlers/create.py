@@ -74,13 +74,19 @@ async def cb_date(callback: CallbackQuery, state: FSMContext) -> None:
     choice = callback.data.split(":")[1]
     if choice == "manual":
         await state.set_state(CreateForm.date_manual)
-        await callback.message.edit_text("Введите дату в формате <b>ДД.ММ</b> или <b>ДД.ММ.ГГГГ</b>:")
+        await callback.message.edit_text(
+            "Введите дату в формате <b>ДД.ММ</b> или <b>ДД.ММ.ГГГГ</b>:",
+            reply_markup=kb.cancel_create_keyboard(),
+        )
         await callback.answer()
         return
     event_date = today() if choice == "today" else today() + timedelta(days=1)
     await state.update_data(date=event_date.isoformat(), date_str=fmt_date(event_date))
     await state.set_state(CreateForm.time_)
-    await callback.message.edit_text(f"Дата: <b>{fmt_date(event_date)}</b>\nВведите время начала (например, 19:00):")
+    await callback.message.edit_text(
+        f"Дата: <b>{fmt_date(event_date)}</b>\nВведите время начала (например, 19:00):",
+        reply_markup=kb.cancel_create_keyboard(),
+    )
     await callback.answer()
 
 
@@ -95,7 +101,10 @@ async def input_date(message: Message, state: FSMContext) -> None:
         return
     await state.update_data(date=event_date.isoformat(), date_str=fmt_date(event_date))
     await state.set_state(CreateForm.time_)
-    await message.answer(f"Дата: <b>{fmt_date(event_date)}</b>\nВведите время начала (например, 19:00):")
+    await message.answer(
+        f"Дата: <b>{fmt_date(event_date)}</b>\nВведите время начала (например, 19:00):",
+        reply_markup=kb.cancel_create_keyboard(),
+    )
 
 
 @router.message(CreateForm.time_, F.text)
@@ -106,7 +115,7 @@ async def input_time(message: Message, state: FSMContext) -> None:
         return
     await state.update_data(time=event_time.isoformat(), time_str=fmt_time(event_time))
     await state.set_state(CreateForm.place)
-    await message.answer("Введите место проведения:")
+    await message.answer("Введите место проведения:", reply_markup=kb.cancel_create_keyboard())
 
 
 @router.message(CreateForm.place, F.text)
@@ -117,7 +126,7 @@ async def input_place(message: Message, state: FSMContext) -> None:
         return
     await state.update_data(place=place)
     await state.set_state(CreateForm.host)
-    await message.answer("Введите имя ведущего игр:")
+    await message.answer("Введите имя ведущего игр:", reply_markup=kb.cancel_create_keyboard())
 
 
 @router.message(CreateForm.host, F.text)
