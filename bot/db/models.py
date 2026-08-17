@@ -19,6 +19,15 @@ class AppSetting(Base):
     value: Mapped[str] = mapped_column(String(128))
 
 
+class Group(Base):
+    """Группа Telegram, куда установлен бот. Настройки и типы — per-группа."""
+    __tablename__ = "groups"
+
+    chat_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
+    title: Mapped[str | None] = mapped_column(String(128))
+    timezone: Mapped[str | None] = mapped_column(String(64))  # None — фолбэк на TZ/системное
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -32,7 +41,9 @@ class EventType(Base):
     __tablename__ = "event_types"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(String(64), unique=True)
+    # группа-владелец типа; одноимённые типы в разных группах независимы
+    group_chat_id: Mapped[int | None] = mapped_column(BigInteger)
+    name: Mapped[str] = mapped_column(String(64))
     # тема, в которой публикуются мероприятия этого типа
     chat_id: Mapped[int | None] = mapped_column(BigInteger)
     topic_id: Mapped[int | None] = mapped_column(Integer)
@@ -90,9 +101,43 @@ async def init_db() -> None:
     engine = create_async_engine(f"sqlite+aiosqlite:///{settings.db_path}")
     Session = async_sessionmaker(engine, expire_on_commit=False)
     async with engine.begin() as conn:
+        # миграция на мультитенантность: старая event_types (без group_chat_id,
+        # с UNIQUE на name) пересоздаётся — ALTER в SQLite ограничения не меняет
+        result = await conn.exec_driver_sql(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='event_types'"
+        )
+        legacy_types = False
+        if result.fetchone():
+            columns = [row[1] for row in (
+                await conn.exec_driver_sql("PRAGMA table_info(event_types)")
+            ).fetchall()]
+            if "group_chat_id" not in columns:
+                legacy_types = True
+                await conn.exec_driver_sql("ALTER TABLE event_types RENAME TO event_types_old")
+
         await conn.run_sync(Base.metadata.create_all)
+
         # create_all не добавляет колонки в существующие таблицы — доливаем вручную
         result = await conn.exec_driver_sql("PRAGMA table_info(registrations)")
         columns = [row[1] for row in result.fetchall()]
         if "username" not in columns:
             await conn.exec_driver_sql("ALTER TABLE registrations ADD COLUMN username VARCHAR(64)")
+
+        if legacy_types:
+            # группы — из привязок старых типов; типы получают группу-владельца
+            await conn.exec_driver_sql(
+                "INSERT OR IGNORE INTO groups (chat_id, title, timezone) "
+                "SELECT DISTINCT chat_id, NULL, NULL FROM event_types_old WHERE chat_id IS NOT NULL"
+            )
+            await conn.exec_driver_sql(
+                "INSERT INTO event_types "
+                "(id, name, chat_id, topic_id, remind_chat_id, remind_topic_id, is_default, group_chat_id) "
+                "SELECT id, name, chat_id, topic_id, remind_chat_id, remind_topic_id, is_default, chat_id "
+                "FROM event_types_old"
+            )
+            # непривязанные типы: если группа одна — отдаём ей
+            await conn.exec_driver_sql(
+                "UPDATE event_types SET group_chat_id = (SELECT chat_id FROM groups LIMIT 1) "
+                "WHERE group_chat_id IS NULL AND (SELECT COUNT(*) FROM groups) = 1"
+            )
+            await conn.exec_driver_sql("DROP TABLE event_types_old")

@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import sys
-from zoneinfo import ZoneInfo
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -30,16 +29,19 @@ async def main() -> None:
         sys.exit(1)
 
     await init_db()
-    await repo.ensure_default_type("Мафия")
 
-    # часовой пояс из настроек бота приоритетнее .env и системного
+    # миграция: глобальная настройка пояса (v1.5.0) переезжает в группы
     saved_tz = await repo.get_setting("timezone")
     if saved_tz:
-        try:
-            config.set_tz(ZoneInfo(saved_tz))
-        except Exception:
-            logger.warning("Некорректный часовой пояс в настройках: %s — игнорирую", saved_tz)
-    logger.info("Часовой пояс: %s", config.get_tz())
+        for group in await repo.list_groups():
+            if not group.timezone:
+                await repo.set_group_timezone(group.chat_id, saved_tz)
+        await repo.delete_setting("timezone")
+
+    groups = await repo.list_groups()
+    for group in groups:
+        await repo.ensure_default_type(group.chat_id)
+    logger.info("Групп: %d, часовой пояс по умолчанию: %s", len(groups), config.get_tz())
 
     bot = Bot(settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher(storage=MemoryStorage())

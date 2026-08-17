@@ -1,7 +1,10 @@
+from zoneinfo import ZoneInfo
+
 from sqlalchemy import and_, delete, or_, select
 
+from bot.config import get_tz
 from bot.db import models
-from bot.db.models import AppSetting, Event, EventType, Registration, User
+from bot.db.models import AppSetting, Event, EventType, Group, Registration, User
 
 
 def S():
@@ -25,6 +28,58 @@ async def set_setting(key: str, value: str) -> None:
         else:
             s.add(AppSetting(key=key, value=value))
         await s.commit()
+
+
+async def delete_setting(key: str) -> None:
+    async with S() as s:
+        await s.execute(delete(AppSetting).where(AppSetting.key == key))
+        await s.commit()
+
+
+# ---------- groups ----------
+
+async def ensure_group(chat_id: int, title: str | None = None) -> Group:
+    async with S() as s:
+        group = await s.get(Group, chat_id)
+        if not group:
+            group = Group(chat_id=chat_id, title=title)
+            s.add(group)
+            await s.commit()
+        elif title and group.title != title:
+            group.title = title
+            await s.commit()
+        return group
+
+
+async def get_group(chat_id: int) -> Group | None:
+    async with S() as s:
+        return await s.get(Group, chat_id)
+
+
+async def list_groups() -> list[Group]:
+    async with S() as s:
+        result = await s.execute(select(Group).order_by(Group.title, Group.chat_id))
+        return list(result.scalars().all())
+
+
+async def set_group_timezone(chat_id: int, tz_name: str) -> None:
+    async with S() as s:
+        group = await s.get(Group, chat_id)
+        if group:
+            group.timezone = tz_name
+            await s.commit()
+
+
+async def group_tz(chat_id: int | None):
+    """Часовой пояс группы; фолбэк — TZ из .env или системное время."""
+    if chat_id:
+        group = await get_group(chat_id)
+        if group and group.timezone:
+            try:
+                return ZoneInfo(group.timezone)
+            except Exception:
+                pass
+    return get_tz()
 
 
 # ---------- users ----------
@@ -54,26 +109,36 @@ async def set_nick(tg_id: int, nick: str) -> None:
         await s.commit()
 
 
-# ---------- event types ----------
+# ---------- event types (в разрезе группы) ----------
 
-async def ensure_default_type(name: str) -> None:
+async def ensure_default_type(group_chat_id: int, name: str = "Мафия") -> None:
     async with S() as s:
-        result = await s.execute(select(EventType).where(EventType.is_default.is_(True)))
+        result = await s.execute(
+            select(EventType).where(
+                EventType.group_chat_id == group_chat_id, EventType.is_default.is_(True)
+            )
+        )
         if result.scalars().first():
             return
-        result = await s.execute(select(EventType).where(EventType.name == name))
+        result = await s.execute(
+            select(EventType).where(
+                EventType.group_chat_id == group_chat_id, EventType.name == name
+            )
+        )
         et = result.scalars().first()
         if et:
             et.is_default = True
         else:
-            s.add(EventType(name=name, is_default=True))
+            s.add(EventType(group_chat_id=group_chat_id, name=name, is_default=True))
         await s.commit()
 
 
-async def list_types() -> list[EventType]:
+async def list_types(group_chat_id: int) -> list[EventType]:
     async with S() as s:
         result = await s.execute(
-            select(EventType).order_by(EventType.is_default.desc(), EventType.name)
+            select(EventType)
+            .where(EventType.group_chat_id == group_chat_id)
+            .order_by(EventType.is_default.desc(), EventType.name)
         )
         return list(result.scalars().all())
 
@@ -83,20 +148,20 @@ async def get_type(type_id: int) -> EventType | None:
         return await s.get(EventType, type_id)
 
 
-async def get_type_by_name(name: str) -> EventType | None:
+async def get_type_by_name(group_chat_id: int, name: str) -> EventType | None:
     # регистронезависимо для кириллицы сравниваем в питоне (lower() в SQLite — только ASCII)
     target = name.strip().lower()
-    for et in await list_types():
+    for et in await list_types(group_chat_id):
         if et.name.lower() == target:
             return et
     return None
 
 
-async def add_type(name: str) -> EventType | None:
-    if await get_type_by_name(name):
+async def add_type(group_chat_id: int, name: str) -> EventType | None:
+    if await get_type_by_name(group_chat_id, name):
         return None
     async with S() as s:
-        et = EventType(name=name.strip())
+        et = EventType(group_chat_id=group_chat_id, name=name.strip())
         s.add(et)
         await s.commit()
         return et
@@ -144,11 +209,12 @@ async def update_event(event_id: int, **fields) -> Event | None:
         return event
 
 
-async def list_active_events() -> list[Event]:
+async def list_active_events(chat_id: int | None = None) -> list[Event]:
     async with S() as s:
-        result = await s.execute(
-            select(Event).where(Event.status == "active").order_by(Event.date_, Event.time_)
-        )
+        query = select(Event).where(Event.status == "active")
+        if chat_id is not None:
+            query = query.where(Event.chat_id == chat_id)
+        result = await s.execute(query.order_by(Event.date_, Event.time_))
         return list(result.scalars().all())
 
 

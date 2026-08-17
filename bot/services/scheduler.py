@@ -23,24 +23,25 @@ def setup(bot: Bot) -> None:
     _bot = bot
 
 
-def _close_at(event: Event) -> datetime:
-    # конец дня проведения: полночь следующего дня
-    return datetime.combine(event.date_ + timedelta(days=1), time(0, 0), tzinfo=get_tz())
+def _close_at(event: Event, tz) -> datetime:
+    # конец дня проведения: полночь следующего дня по времени группы
+    return datetime.combine(event.date_ + timedelta(days=1), time(0, 0), tzinfo=tz)
 
 
-def _remind_at(event: Event) -> datetime:
-    return datetime.combine(event.date_, event.time_, tzinfo=get_tz()) - timedelta(hours=1)
+def _remind_at(event: Event, tz) -> datetime:
+    return datetime.combine(event.date_, event.time_, tzinfo=tz) - timedelta(hours=1)
 
 
-def schedule_event_jobs(event: Event) -> None:
-    now = datetime.now(get_tz())
-    close_at = _close_at(event)
+async def schedule_event_jobs(event: Event) -> None:
+    tz = await repo.group_tz(event.chat_id)
+    now = datetime.now(tz)
+    close_at = _close_at(event, tz)
     if close_at > now:
         scheduler.add_job(
             close_event, "date", run_date=close_at,
             id=f"close:{event.id}", args=[event.id], replace_existing=True,
         )
-    remind_at = _remind_at(event)
+    remind_at = _remind_at(event, tz)
     if event.remind_enabled and remind_at > now:
         scheduler.add_job(
             send_reminder, "date", run_date=remind_at,
@@ -55,10 +56,10 @@ def cancel_event_jobs(event_id: int) -> None:
             job.remove()
 
 
-def reschedule(event: Event) -> None:
+async def reschedule(event: Event) -> None:
     cancel_event_jobs(event.id)
     if event.status == "active":
-        schedule_event_jobs(event)
+        await schedule_event_jobs(event)
 
 
 async def close_event(event_id: int) -> None:
@@ -101,9 +102,9 @@ async def send_reminder(event_id: int) -> None:
 async def restore_jobs() -> None:
     """При старте бота восстанавливаем задачи по активным событиям.
     Если время закрытия прошло, пока бот лежал, — закрываем сразу."""
-    now = datetime.now(get_tz())
     for event in await repo.list_active_events():
-        if _close_at(event) <= now:
+        tz = await repo.group_tz(event.chat_id)
+        if _close_at(event, tz) <= datetime.now(tz):
             await close_event(event.id)
         else:
-            schedule_event_jobs(event)
+            await schedule_event_jobs(event)

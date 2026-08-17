@@ -1,6 +1,17 @@
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-from bot.db.models import Event, EventType, Registration
+from bot.db.models import Event, EventType, Group, Registration
+
+
+def group_picker_keyboard(groups: list[Group], prefix: str) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(
+            text=group.title or str(group.chat_id),
+            callback_data=f"{prefix}:{group.chat_id}",
+        )]
+        for group in groups
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def event_keyboard(event_id: int, has_guests: bool = False) -> InlineKeyboardMarkup:
@@ -159,10 +170,10 @@ def cancel_friend_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
-def settings_keyboard() -> InlineKeyboardMarkup:
+def settings_keyboard(chat_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="➕ Добавить тип мероприятия", callback_data="st:add")],
-        [InlineKeyboardButton(text="🌍 Часовой пояс", callback_data="st:tz")],
+        [InlineKeyboardButton(text="➕ Добавить тип мероприятия", callback_data=f"st:add:{chat_id}")],
+        [InlineKeyboardButton(text="🌍 Часовой пояс", callback_data=f"st:tz:{chat_id}")],
     ])
 
 
@@ -181,12 +192,12 @@ TZ_CHOICES = [
 ]
 
 
-def tz_keyboard() -> InlineKeyboardMarkup:
+def tz_keyboard(chat_id: int) -> InlineKeyboardMarkup:
     rows = []
     for i in range(0, len(TZ_CHOICES), 2):
         rows.append([
-            InlineKeyboardButton(text=label, callback_data=f"tzset:{name}")
+            InlineKeyboardButton(text=label, callback_data=f"tzset:{chat_id}:{name}")
             for label, name in TZ_CHOICES[i:i + 2]
         ])
-    rows.append([InlineKeyboardButton(text="✏ Ввести вручную", callback_data="st:tzmanual")])
+    rows.append([InlineKeyboardButton(text="✏ Ввести вручную", callback_data=f"st:tzm:{chat_id}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
