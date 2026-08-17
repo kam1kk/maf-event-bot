@@ -8,7 +8,7 @@ from aiogram.types import CallbackQuery, Message
 
 from bot import keyboards as kb
 from bot.db import repo
-from bot.services import roster, scheduler
+from bot.services import membership, roster, scheduler
 from bot.services.render import render_summary
 from bot.utils import fmt_date, fmt_time, parse_date, parse_time
 
@@ -22,11 +22,18 @@ class EditForm(StatesGroup):
     host = State()
 
 
+async def _can_manage(bot: Bot, event, user_id: int) -> bool:
+    """Создатель мероприятия или админ бота его группы."""
+    if user_id == event.creator_id:
+        return True
+    return await membership.is_bot_admin(bot, event.chat_id, user_id)
+
+
 async def send_manage_menu(bot: Bot, user_id: int, event_id: int) -> bool:
     event = await repo.get_event(event_id)
     if not event:
         return False
-    if user_id != event.creator_id:
+    if not await _can_manage(bot, event, user_id):
         return False
     try:
         await bot.send_message(
@@ -46,8 +53,10 @@ async def cb_manage(callback: CallbackQuery, bot: Bot) -> None:
     if not event:
         await callback.answer("Мероприятие не найдено", show_alert=True)
         return
-    if callback.from_user.id != event.creator_id:
-        await callback.answer("Управлять мероприятием может только его создатель", show_alert=True)
+    if not await _can_manage(bot, event, callback.from_user.id):
+        await callback.answer(
+            "Управлять мероприятием может его создатель или админ бота", show_alert=True
+        )
         return
     if event.status != "active":
         await callback.answer("Мероприятие уже завершено", show_alert=True)
@@ -78,8 +87,8 @@ async def cb_manage_action(callback: CallbackQuery, state: FSMContext, bot: Bot)
     if not event:
         await callback.answer("Мероприятие не найдено", show_alert=True)
         return
-    if callback.from_user.id != event.creator_id:
-        await callback.answer("Только создатель", show_alert=True)
+    if not await _can_manage(bot, event, callback.from_user.id):
+        await callback.answer("Только создатель или админ бота", show_alert=True)
         return
     if event.status != "active" and action != "close":
         await callback.answer("Мероприятие уже завершено", show_alert=True)
@@ -148,7 +157,7 @@ async def cb_edit_date(callback: CallbackQuery, state: FSMContext, bot: Bot) -> 
     _, event_id_raw, choice = callback.data.split(":")
     event_id = int(event_id_raw)
     event = await repo.get_event(event_id)
-    if not event or callback.from_user.id != event.creator_id:
+    if not event or not await _can_manage(bot, event, callback.from_user.id):
         await callback.answer("Недоступно", show_alert=True)
         return
 
@@ -230,7 +239,7 @@ async def cb_kick(callback: CallbackQuery, bot: Bot) -> None:
     _, event_id_raw, reg_id_raw = callback.data.split(":")
     event_id, reg_id = int(event_id_raw), int(reg_id_raw)
     event = await repo.get_event(event_id)
-    if not event or callback.from_user.id != event.creator_id:
+    if not event or not await _can_manage(bot, event, callback.from_user.id):
         await callback.answer("Недоступно", show_alert=True)
         return
     if event.status != "active":
@@ -263,7 +272,7 @@ async def cb_cancel_confirm(callback: CallbackQuery, bot: Bot) -> None:
     _, event_id_raw, choice = callback.data.split(":")
     event_id = int(event_id_raw)
     event = await repo.get_event(event_id)
-    if not event or callback.from_user.id != event.creator_id:
+    if not event or not await _can_manage(bot, event, callback.from_user.id):
         await callback.answer("Недоступно", show_alert=True)
         return
 

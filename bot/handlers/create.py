@@ -63,12 +63,20 @@ def _preview_text(data: dict) -> str:
 async def cmd_new(message: Message, state: FSMContext, bot: Bot) -> None:
     await state.clear()
     await repo.get_or_create_user(message.from_user.id)
-    groups = await membership.user_groups(bot, message.from_user.id)
-    if not groups:
+    all_groups = await membership.user_groups(bot, message.from_user.id)
+    if not all_groups:
         await message.answer(
             "Я не вижу вас ни в одной группе, где я работаю. "
             "Убедитесь, что вы состоите в группе и бот туда добавлен."
         )
+        return
+    # режим «только админы»: такие группы доступны лишь админам бота
+    groups = []
+    for g in all_groups:
+        if not g.only_admins_create or await membership.is_bot_admin(bot, g.chat_id, message.from_user.id):
+            groups.append(g)
+    if not groups:
+        await message.answer("В ваших группах создавать мероприятия могут только админы бота.")
         return
     if len(groups) == 1:
         await _show_types(message, state, groups[0].chat_id, edit=False)

@@ -26,6 +26,20 @@ class Group(Base):
     chat_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
     title: Mapped[str | None] = mapped_column(String(128))
     timezone: Mapped[str | None] = mapped_column(String(64))  # None — фолбэк на TZ/системное
+    # режим «создавать мероприятия могут только админы»; по умолчанию могут все
+    only_admins_create: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class GroupAdmin(Base):
+    """Участник, которому выдали права админа бота в конкретной группе.
+    Telegram-админы группы считаются админами бота автоматически, без записи здесь."""
+    __tablename__ = "group_admins"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger)
+    user_id: Mapped[int] = mapped_column(BigInteger)
+    name: Mapped[str | None] = mapped_column(String(128))  # имя на момент выдачи, для списка
+    granted_by: Mapped[int] = mapped_column(BigInteger)
 
 
 class User(Base):
@@ -122,6 +136,12 @@ async def init_db() -> None:
         columns = [row[1] for row in result.fetchall()]
         if "username" not in columns:
             await conn.exec_driver_sql("ALTER TABLE registrations ADD COLUMN username VARCHAR(64)")
+        result = await conn.exec_driver_sql("PRAGMA table_info(groups)")
+        columns = [row[1] for row in result.fetchall()]
+        if columns and "only_admins_create" not in columns:
+            await conn.exec_driver_sql(
+                "ALTER TABLE groups ADD COLUMN only_admins_create BOOLEAN DEFAULT 0"
+            )
 
         if legacy_types:
             # группы — из привязок старых типов; типы получают группу-владельца
