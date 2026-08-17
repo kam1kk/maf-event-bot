@@ -3,12 +3,18 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from bot.db.models import Event, EventType, Registration
 
 
-def event_keyboard(event_id: int) -> InlineKeyboardMarkup:
+def event_keyboard(event_id: int, has_guests: bool = False) -> InlineKeyboardMarkup:
+    friends_row = [InlineKeyboardButton(text="➕ Записать друга", callback_data=f"friend:{event_id}")]
+    if has_guests:
+        friends_row.append(
+            InlineKeyboardButton(text="➖ Выписать друга", callback_data=f"unfriend:{event_id}")
+        )
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="✅ Записаться", callback_data=f"reg:{event_id}"),
             InlineKeyboardButton(text="🕐 Со временем", callback_data=f"regt:{event_id}"),
         ],
+        friends_row,
         [
             InlineKeyboardButton(text="🚪 Выписаться", callback_data=f"unreg:{event_id}"),
             InlineKeyboardButton(text="⚙ Управление", callback_data=f"manage:{event_id}"),
@@ -113,27 +119,44 @@ def cancel_confirm_keyboard(event_id: int) -> InlineKeyboardMarkup:
 
 def my_regs_keyboard(items: list) -> InlineKeyboardMarkup:
     """items: list[(Registration, Event)]"""
-    rows = [
-        [InlineKeyboardButton(
-            text=f"{event.type_name} — {event.date_.strftime('%d.%m')} {event.time_.strftime('%H:%M')}",
-            callback_data=f"my:{reg.id}",
-        )]
-        for reg, event in items
-    ]
+    rows = []
+    for reg, event in items:
+        label = f"{event.type_name} — {event.date_.strftime('%d.%m')} {event.time_.strftime('%H:%M')}"
+        if reg.user_id is None:
+            label += f" · друг: {reg.nick}"
+        rows.append([InlineKeyboardButton(text=label, callback_data=f"my:{reg.id}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def my_reg_menu_keyboard(reg: Registration) -> InlineKeyboardMarkup:
     r = reg.id
+    guest = reg.user_id is None
+    arrive_label = "🕐 Опоздает (к …)" if guest else "🕐 Приду позже (к …)"
+    leave_label = "🕗 Уйдёт раньше (до …)" if guest else "🕗 Уйду раньше (до …)"
+    unreg_label = "🚪 Выписать друга" if guest else "🚪 Выписаться"
     rows = [
-        [InlineKeyboardButton(text="🕐 Приду позже (к …)", callback_data=f"myr:{r}:arrive")],
-        [InlineKeyboardButton(text="🕗 Уйду раньше (до …)", callback_data=f"myr:{r}:leave")],
+        [InlineKeyboardButton(text=arrive_label, callback_data=f"myr:{r}:arrive")],
+        [InlineKeyboardButton(text=leave_label, callback_data=f"myr:{r}:leave")],
     ]
     if reg.arrive_time or reg.leave_time:
         rows.append([InlineKeyboardButton(text="♻ Сбросить время", callback_data=f"myr:{r}:reset")])
-    rows.append([InlineKeyboardButton(text="🚪 Выписаться", callback_data=f"myr:{r}:unreg")])
+    rows.append([InlineKeyboardButton(text=unreg_label, callback_data=f"myr:{r}:unreg")])
     rows.append([InlineKeyboardButton(text="« Назад", callback_data="myr:back")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def unfriend_keyboard(event_id: int, guests: list[Registration]) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text=f"🚪 {reg.nick}", callback_data=f"unfr:{event_id}:{reg.id}")]
+        for reg in guests
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def cancel_friend_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✖ Отмена", callback_data="frx")],
+    ])
 
 
 def settings_keyboard() -> InlineKeyboardMarkup:

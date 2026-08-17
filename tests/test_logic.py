@@ -63,6 +63,24 @@ def test_smoke(tmp_path):
         items = await repo.list_user_regs_on_active(3)
         assert len(items) == 1 and items[0][1].id == event.id
 
+        # друг (гость): user_id=None, added_by=2 — рендерится без ссылки на профиль
+        await repo.add_reg(event.id, None, 2, "ДругВася")
+        text = render_event(event, await repo.get_regs(event.id))
+        assert "ДругВася" in text and "ДругВася</a>" not in text
+        assert await repo.event_has_guests(event.id)
+        guests = await repo.get_guest_regs(event.id, 2)
+        assert len(guests) == 1 and guests[0].nick == "ДругВася"
+        assert await repo.get_guest_regs(event.id, 3) == []
+
+        # человек записался сам с тем же ником — дубликат допустим, гость не удаляется
+        await repo.add_reg(event.id, 500, 500, "ДругВася")
+        text = render_event(event, await repo.get_regs(event.id))
+        assert text.count("ДругВася") == 2
+
+        # /my показывает и свою запись, и добавленных друзей
+        items = await repo.list_user_regs_on_active(2)
+        assert len(items) == 2  # своя запись (Nick2) + гость
+
     asyncio.run(run())
 
 
