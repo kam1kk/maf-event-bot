@@ -33,14 +33,14 @@ async def main() -> None:
     # миграция: глобальная настройка пояса (v1.5.0) переезжает в группы
     saved_tz = await repo.get_setting("timezone")
     if saved_tz:
-        for group in await repo.list_groups():
-            if not group.timezone:
-                await repo.set_group_timezone(group.chat_id, saved_tz)
+        for g in await repo.list_groups():
+            if not g.timezone:
+                await repo.set_group_timezone(g.chat_id, saved_tz)
         await repo.delete_setting("timezone")
 
     groups = await repo.list_groups()
-    for group in groups:
-        await repo.ensure_default_type(group.chat_id)
+    for g in groups:
+        await repo.ensure_default_type(g.chat_id)
     logger.info("Групп: %d, часовой пояс по умолчанию: %s", len(groups), config.get_tz())
 
     bot = Bot(settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
