@@ -7,9 +7,12 @@ def event_keyboard(event_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="✅ Записаться", callback_data=f"reg:{event_id}"),
-            InlineKeyboardButton(text="🚪 Выписаться", callback_data=f"unreg:{event_id}"),
+            InlineKeyboardButton(text="🕐 Со временем", callback_data=f"regt:{event_id}"),
         ],
-        [InlineKeyboardButton(text="⚙ Управление", callback_data=f"manage:{event_id}")],
+        [
+            InlineKeyboardButton(text="🚪 Выписаться", callback_data=f"unreg:{event_id}"),
+            InlineKeyboardButton(text="⚙ Управление", callback_data=f"manage:{event_id}"),
+        ],
     ])
 
 

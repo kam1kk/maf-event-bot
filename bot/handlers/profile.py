@@ -4,6 +4,8 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
 
+from html import escape
+
 from bot import keyboards as kb
 from bot.db import repo
 from bot.services import roster
@@ -31,10 +33,35 @@ class RegTimeForm(StatesGroup):
     leave = State()
 
 
-async def _ask_nick(message: Message, state: FSMContext, reg_event_id: int | None) -> None:
+async def _ask_nick(
+    message: Message, state: FSMContext, reg_event_id: int | None, time_flow: bool = False
+) -> None:
     await state.set_state(NickForm.waiting)
-    await state.update_data(reg_event_id=reg_event_id)
+    await state.update_data(reg_event_id=reg_event_id, time_flow=time_flow)
     await message.answer("Введите ваш игровой ник — я запомню его и буду подставлять при записи:")
+
+
+async def _open_time_menu(bot: Bot, message: Message, event_id: int, user_id: int, nick: str) -> None:
+    """Кнопка «Со временем»: записывает (если ещё не записан) и открывает меню времени.
+    Для уже записанного — изменение его текущей записи."""
+    event = await repo.get_event(event_id)
+    if not event or event.status != "active":
+        await message.answer("Запись на это мероприятие закрыта.")
+        return
+    reg = await repo.get_reg(event_id, user_id)
+    header = ""
+    if not reg:
+        ok, text = await roster.register(bot, event_id, user_id, nick)
+        if not ok:
+            await message.answer(text)
+            return
+        reg = await repo.get_reg(event_id, user_id)
+        header = "Вы записаны ✅\n\n"
+    await message.answer(
+        f"{header}{render_summary(event)}\n\n"
+        f"Запись: <b>{escape(reg.nick)}</b>. Укажите время:",
+        reply_markup=kb.my_reg_menu_keyboard(reg),
+    )
 
 
 @router.message(CommandStart(deep_link=True))
@@ -54,6 +81,18 @@ async def cmd_start_deeplink(message: Message, command: CommandObject, state: FS
             await message.answer(text)
         else:
             await _ask_nick(message, state, event_id)
+        return
+
+    if args.startswith("time_"):
+        try:
+            event_id = int(args[5:])
+        except ValueError:
+            await message.answer(WELCOME)
+            return
+        if user.nick:
+            await _open_time_menu(bot, message, event_id, message.from_user.id, user.nick)
+        else:
+            await _ask_nick(message, state, event_id, time_flow=True)
         return
 
     if args.startswith("mng_"):
@@ -102,11 +141,14 @@ async def input_nick(message: Message, state: FSMContext, bot: Bot) -> None:
     await state.clear()
 
     reg_event_id = data.get("reg_event_id")
-    if reg_event_id:
+    if reg_event_id and data.get("time_flow"):
+        await message.answer(f"Ник сохранён: <b>{escape(nick)}</b> ✅")
+        await _open_time_menu(bot, message, reg_event_id, message.from_user.id, nick)
+    elif reg_event_id:
         ok, text = await roster.register(bot, reg_event_id, message.from_user.id, nick)
-        await message.answer(f"Ник сохранён: <b>{nick}</b>\n{text}")
+        await message.answer(f"Ник сохранён: <b>{escape(nick)}</b>\n{text}")
     else:
-        await message.answer(f"Ник сохранён: <b>{nick}</b> ✅")
+        await message.answer(f"Ник сохранён: <b>{escape(nick)}</b> ✅")
 
 
 # ---------- мои записи ----------
@@ -133,7 +175,7 @@ async def cb_my_reg(callback: CallbackQuery) -> None:
         await callback.answer("Запись на это мероприятие уже закрыта", show_alert=True)
         return
     await callback.message.edit_text(
-        f"{render_summary(event)}\n\nВы записаны как <b>{reg.nick}</b>. Что сделать?",
+        f"{render_summary(event)}\n\nВы записаны как <b>{escape(reg.nick)}</b>. Что сделать?",
         reply_markup=kb.my_reg_menu_keyboard(reg),
     )
     await callback.answer()
@@ -198,7 +240,10 @@ async def input_arrive(message: Message, state: FSMContext, bot: Bot) -> None:
     reg = await repo.update_reg(data["reg_id"], category="late", arrive_time=t)
     if reg:
         await roster.refresh_event_message(bot, reg.event_id)
-        await message.answer(f"Отметил: придёте к {message.text.strip()} — вы в списке «Опоздавшие» ✅")
+        await message.answer(
+            f"Отметил: придёте к {message.text.strip()} — вы в списке «Опоздавшие» ✅",
+            reply_markup=kb.my_reg_menu_keyboard(reg),
+        )
 
 
 @router.message(RegTimeForm.leave, F.text)
@@ -212,4 +257,7 @@ async def input_leave(message: Message, state: FSMContext, bot: Bot) -> None:
     reg = await repo.update_reg(data["reg_id"], leave_time=t)
     if reg:
         await roster.refresh_event_message(bot, reg.event_id)
-        await message.answer(f"Отметил: будете до {message.text.strip()} ✅")
+        await message.answer(
+            f"Отметил: будете до {message.text.strip()} ✅",
+            reply_markup=kb.my_reg_menu_keyboard(reg),
+        )

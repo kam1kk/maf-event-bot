@@ -30,6 +30,20 @@ async def cb_register(callback: CallbackQuery, bot: Bot) -> None:
     await callback.answer(text, show_alert=not ok)
 
 
+@router.callback_query(F.data.startswith("regt:"))
+async def cb_register_timed(callback: CallbackQuery, bot: Bot) -> None:
+    """Запись с указанием времени: выбор опций возможен только в личке,
+    поэтому всегда уводим deep-link'ом. Если человек уже записан —
+    в личке откроется изменение его записи."""
+    event_id = int(callback.data.split(":")[1])
+    event = await repo.get_event(event_id)
+    if not event or event.status != "active":
+        await callback.answer("Запись закрыта", show_alert=True)
+        return
+    me = await bot.get_me()
+    await callback.answer(url=f"https://t.me/{me.username}?start=time_{event_id}")
+
+
 @router.callback_query(F.data.startswith("unreg:"))
 async def cb_unregister(callback: CallbackQuery, bot: Bot) -> None:
     event_id = int(callback.data.split(":")[1])
