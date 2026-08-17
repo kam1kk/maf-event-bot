@@ -1,14 +1,14 @@
 import re
 from datetime import date, datetime, time
 
-from bot.config import TZ
+from bot.config import get_tz
 
 DATE_RE = re.compile(r"(\d{1,2})[.\-/](\d{1,2})(?:[.\-/](\d{2,4}))?")
 TIME_RE = re.compile(r"(\d{1,2})[:.](\d{2})")
 
 
 def today() -> date:
-    return datetime.now(TZ).date()
+    return datetime.now(get_tz()).date()
 
 
 def parse_date(text: str) -> date | None:

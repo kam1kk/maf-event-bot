@@ -16,5 +16,16 @@ class Settings:
 
 
 settings = Settings()
-# пустой TZ — часовой пояс системы, на которой работает бот
-TZ = ZoneInfo(settings.tz_name) if settings.tz_name else get_localzone()
+
+# приоритет: настройка в БД (ставится при старте и из /settings) → TZ из .env →
+# системный часовой пояс машины, где работает бот
+_tz = ZoneInfo(settings.tz_name) if settings.tz_name else get_localzone()
+
+
+def get_tz():
+    return _tz
+
+
+def set_tz(tz) -> None:
+    global _tz
+    _tz = tz
