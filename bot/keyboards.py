@@ -28,14 +28,32 @@ def types_keyboard(types: list[EventType]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def date_keyboard(prefix: str) -> InlineKeyboardMarkup:
+def date_keyboard(prefix: str, cancel_cb: str = "cform:cancel", cancel_text: str = "✖ Отмена") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="Сегодня", callback_data=f"{prefix}:today"),
             InlineKeyboardButton(text="Завтра", callback_data=f"{prefix}:tomorrow"),
         ],
         [InlineKeyboardButton(text="📅 Ввести дату", callback_data=f"{prefix}:manual")],
+        [InlineKeyboardButton(text=cancel_text, callback_data=cancel_cb)],
+    ])
+
+
+def cancel_create_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✖ Отмена", callback_data="cform:cancel")],
+    ])
+
+
+def back_to_manage_keyboard(event_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="« Назад", callback_data=f"mng:{event_id}:menu")],
+    ])
+
+
+def back_to_reg_keyboard(reg_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="« Назад", callback_data=f"my:{reg_id}")],
     ])
 
 

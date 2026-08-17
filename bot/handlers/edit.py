@@ -88,19 +88,31 @@ async def cb_manage_action(callback: CallbackQuery, state: FSMContext, bot: Bot)
     if action == "date":
         await state.clear()
         await state.update_data(event_id=event_id)
-        await callback.message.edit_text("Новая дата:", reply_markup=kb.date_keyboard(f"ed:{event_id}"))
+        await callback.message.edit_text(
+            "Новая дата:",
+            reply_markup=kb.date_keyboard(f"ed:{event_id}", cancel_cb=f"mng:{event_id}:menu", cancel_text="« Назад"),
+        )
     elif action == "time":
         await state.set_state(EditForm.time_)
         await state.update_data(event_id=event_id)
-        await callback.message.edit_text("Введите новое время начала (например, 19:00):")
+        await callback.message.edit_text(
+            "Введите новое время начала (например, 19:00):",
+            reply_markup=kb.back_to_manage_keyboard(event_id),
+        )
     elif action == "place":
         await state.set_state(EditForm.place)
         await state.update_data(event_id=event_id)
-        await callback.message.edit_text("Введите новое место проведения:")
+        await callback.message.edit_text(
+            "Введите новое место проведения:",
+            reply_markup=kb.back_to_manage_keyboard(event_id),
+        )
     elif action == "host":
         await state.set_state(EditForm.host)
         await state.update_data(event_id=event_id)
-        await callback.message.edit_text("Введите нового ведущего:")
+        await callback.message.edit_text(
+            "Введите нового ведущего:",
+            reply_markup=kb.back_to_manage_keyboard(event_id),
+        )
     elif action == "remind":
         event = await repo.update_event(event_id, remind_enabled=not event.remind_enabled)
         scheduler.reschedule(event)
@@ -115,6 +127,8 @@ async def cb_manage_action(callback: CallbackQuery, state: FSMContext, bot: Bot)
             reply_markup=kb.kick_keyboard(event_id, regs),
         )
     elif action == "menu":
+        # «Назад» из любого шага ввода: сбрасываем ожидание текста
+        await state.clear()
         await callback.message.edit_text(
             f"Управление мероприятием:\n\n{render_summary(event)}",
             reply_markup=kb.manage_keyboard(event),
@@ -141,7 +155,10 @@ async def cb_edit_date(callback: CallbackQuery, state: FSMContext, bot: Bot) -> 
     if choice == "manual":
         await state.set_state(EditForm.date_manual)
         await state.update_data(event_id=event_id)
-        await callback.message.edit_text("Введите дату в формате <b>ДД.ММ</b> или <b>ДД.ММ.ГГГГ</b>:")
+        await callback.message.edit_text(
+            "Введите дату в формате <b>ДД.ММ</b> или <b>ДД.ММ.ГГГГ</b>:",
+            reply_markup=kb.back_to_manage_keyboard(event_id),
+        )
         await callback.answer()
         return
 
