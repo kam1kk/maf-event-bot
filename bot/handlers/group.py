@@ -26,7 +26,9 @@ async def cb_register(callback: CallbackQuery, bot: Bot) -> None:
         await callback.answer(url=f"https://t.me/{me.username}?start=reg_{event_id}")
         return
 
-    ok, text = await roster.register(bot, event_id, callback.from_user.id, user.nick)
+    ok, text = await roster.register(
+        bot, event_id, callback.from_user.id, user.nick, callback.from_user.username
+    )
     await callback.answer(text, show_alert=not ok)
 
 

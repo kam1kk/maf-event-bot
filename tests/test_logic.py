@@ -29,22 +29,25 @@ def test_smoke(tmp_path):
             chat_id=et.chat_id, topic_id=et.topic_id,
         )
 
-        # 11 основных + 1 опоздавший + пометка "до"
-        for i in range(1, 12):
+        # 11 основных + 1 опоздавший + пометка "до"; первый — с username
+        await repo.add_reg(event.id, 1, 1, "Nick1", username="nick_one")
+        for i in range(2, 12):
             await repo.add_reg(event.id, i, i, f"Nick{i}")
         late = await repo.add_reg(event.id, 100, 100, "LateGuy")
         await repo.update_reg(late.id, category="late", arrive_time=time(19, 30))
         await repo.update_reg((await repo.get_reg(event.id, 3)).id, leave_time=time(21, 0))
 
         text = render_event(event, await repo.get_regs(event.id))
-        assert "11. Nick11" in text
-        assert "3. Nick3 (до 21:00)" in text
-        assert "1. LateGuy (придёт к 19:30)" in text
+        # ники — ссылки на профиль: t.me при наличии username, иначе tg://user
+        assert '1. <a href="https://t.me/nick_one">Nick1</a>' in text
+        assert '11. <a href="tg://user?id=11">Nick11</a>' in text
+        assert 'Nick3</a> (до 21:00)' in text
+        assert 'LateGuy</a> (придёт к 19:30)' in text
 
         # выписка из середины — сдвиг нумерации
         await repo.delete_reg((await repo.get_reg(event.id, 5)).id)
         text = render_event(event, await repo.get_regs(event.id))
-        assert "5. Nick6" in text and "Nick5" not in text
+        assert '5. <a href="tg://user?id=6">Nick6</a>' in text and "Nick5" not in text
 
         # пустое событие: слоты 1-10, опоздавших не видно
         empty = await repo.create_event(

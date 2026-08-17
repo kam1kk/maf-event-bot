@@ -62,6 +62,7 @@ class Registration(Base):
     user_id: Mapped[int | None] = mapped_column(BigInteger)  # None — гость (задел на будущее)
     added_by: Mapped[int] = mapped_column(BigInteger)
     nick: Mapped[str] = mapped_column(String(64))  # копия ника на момент записи
+    username: Mapped[str | None] = mapped_column(String(64))  # @username на момент записи, для ссылки на профиль
     category: Mapped[str] = mapped_column(String(8), default="main")  # main | late
     arrive_time: Mapped[time | None] = mapped_column(Time)
     leave_time: Mapped[time | None] = mapped_column(Time)
@@ -83,3 +84,8 @@ async def init_db() -> None:
     Session = async_sessionmaker(engine, expire_on_commit=False)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # create_all не добавляет колонки в существующие таблицы — доливаем вручную
+        result = await conn.exec_driver_sql("PRAGMA table_info(registrations)")
+        columns = [row[1] for row in result.fetchall()]
+        if "username" not in columns:
+            await conn.exec_driver_sql("ALTER TABLE registrations ADD COLUMN username VARCHAR(64)")

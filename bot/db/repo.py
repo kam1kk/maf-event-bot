@@ -159,9 +159,13 @@ async def get_reg_by_id(reg_id: int) -> Registration | None:
         return await s.get(Registration, reg_id)
 
 
-async def add_reg(event_id: int, user_id: int, added_by: int, nick: str) -> Registration:
+async def add_reg(
+    event_id: int, user_id: int, added_by: int, nick: str, username: str | None = None
+) -> Registration:
     async with S() as s:
-        reg = Registration(event_id=event_id, user_id=user_id, added_by=added_by, nick=nick)
+        reg = Registration(
+            event_id=event_id, user_id=user_id, added_by=added_by, nick=nick, username=username
+        )
         s.add(reg)
         await s.commit()
         return reg

@@ -5,7 +5,7 @@ from aiogram import Bot, F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, LinkPreviewOptions, Message
 
 from bot import keyboards as kb
 from bot.db import repo
@@ -164,6 +164,7 @@ async def cb_publish(callback: CallbackQuery, state: FSMContext, bot: Bot) -> No
             text,
             message_thread_id=event_type.topic_id,
             reply_markup=kb.event_keyboard(event.id),
+            link_preview_options=LinkPreviewOptions(is_disabled=True),
         )
     except Exception:
         await repo.update_event(event.id, status="cancelled")

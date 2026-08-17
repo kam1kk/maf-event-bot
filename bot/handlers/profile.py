@@ -41,7 +41,9 @@ async def _ask_nick(
     await message.answer("Введите ваш игровой ник — я запомню его и буду подставлять при записи:")
 
 
-async def _open_time_menu(bot: Bot, message: Message, event_id: int, user_id: int, nick: str) -> None:
+async def _open_time_menu(
+    bot: Bot, message: Message, event_id: int, user_id: int, nick: str, username: str | None = None
+) -> None:
     """Кнопка «Со временем»: записывает (если ещё не записан) и открывает меню времени.
     Для уже записанного — изменение его текущей записи."""
     event = await repo.get_event(event_id)
@@ -51,7 +53,7 @@ async def _open_time_menu(bot: Bot, message: Message, event_id: int, user_id: in
     reg = await repo.get_reg(event_id, user_id)
     header = ""
     if not reg:
-        ok, text = await roster.register(bot, event_id, user_id, nick)
+        ok, text = await roster.register(bot, event_id, user_id, nick, username)
         if not ok:
             await message.answer(text)
             return
@@ -77,7 +79,9 @@ async def cmd_start_deeplink(message: Message, command: CommandObject, state: FS
             await message.answer(WELCOME)
             return
         if user.nick:
-            ok, text = await roster.register(bot, event_id, message.from_user.id, user.nick)
+            ok, text = await roster.register(
+                bot, event_id, message.from_user.id, user.nick, message.from_user.username
+            )
             await message.answer(text)
         else:
             await _ask_nick(message, state, event_id)
@@ -90,7 +94,10 @@ async def cmd_start_deeplink(message: Message, command: CommandObject, state: FS
             await message.answer(WELCOME)
             return
         if user.nick:
-            await _open_time_menu(bot, message, event_id, message.from_user.id, user.nick)
+            await _open_time_menu(
+                bot, message, event_id, message.from_user.id, user.nick,
+                message.from_user.username,
+            )
         else:
             await _ask_nick(message, state, event_id, time_flow=True)
         return
@@ -143,9 +150,14 @@ async def input_nick(message: Message, state: FSMContext, bot: Bot) -> None:
     reg_event_id = data.get("reg_event_id")
     if reg_event_id and data.get("time_flow"):
         await message.answer(f"Ник сохранён: <b>{escape(nick)}</b> ✅")
-        await _open_time_menu(bot, message, reg_event_id, message.from_user.id, nick)
+        await _open_time_menu(
+            bot, message, reg_event_id, message.from_user.id, nick,
+            message.from_user.username,
+        )
     elif reg_event_id:
-        ok, text = await roster.register(bot, reg_event_id, message.from_user.id, nick)
+        ok, text = await roster.register(
+            bot, reg_event_id, message.from_user.id, nick, message.from_user.username
+        )
         await message.answer(f"Ник сохранён: <b>{escape(nick)}</b>\n{text}")
     else:
         await message.answer(f"Ник сохранён: <b>{escape(nick)}</b> ✅")

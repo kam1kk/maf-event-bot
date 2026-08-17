@@ -61,9 +61,27 @@ def manage_keyboard(event: Event) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="🎤 Ведущий", callback_data=f"mng:{e}:host"),
         ],
         [InlineKeyboardButton(text=remind_label, callback_data=f"mng:{e}:remind")],
+        [InlineKeyboardButton(text="👥 Выписать участника", callback_data=f"mng:{e}:kick")],
         [InlineKeyboardButton(text="❌ Отменить стол", callback_data=f"mng:{e}:cancel")],
         [InlineKeyboardButton(text="✔ Готово", callback_data=f"mng:{e}:close")],
     ])
+
+
+def kick_keyboard(event_id: int, regs: list[Registration]) -> InlineKeyboardMarkup:
+    rows = []
+    for reg in regs:
+        marks = []
+        if reg.category == "late":
+            marks.append("опаздывает")
+        if reg.leave_time:
+            marks.append(f"до {reg.leave_time.strftime('%H:%M')}")
+        suffix = f" ({', '.join(marks)})" if marks else ""
+        rows.append([InlineKeyboardButton(
+            text=f"🚪 {reg.nick}{suffix}",
+            callback_data=f"kick:{event_id}:{reg.id}",
+        )])
+    rows.append([InlineKeyboardButton(text="« Назад", callback_data=f"mng:{event_id}:menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def cancel_confirm_keyboard(event_id: int) -> InlineKeyboardMarkup:
