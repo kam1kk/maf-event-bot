@@ -207,6 +207,19 @@ async def get_type_by_name(group_chat_id: int, name: str) -> EventType | None:
     return None
 
 
+async def get_type_by_topic(group_chat_id: int, topic_id: int | None) -> EventType | None:
+    """Тип, публикующийся в данной теме группы (для /new из темы)."""
+    async with S() as s:
+        result = await s.execute(
+            select(EventType).where(
+                EventType.group_chat_id == group_chat_id,
+                EventType.chat_id == group_chat_id,
+                EventType.topic_id == topic_id,
+            )
+        )
+        return result.scalars().first()
+
+
 async def add_type(group_chat_id: int, name: str) -> EventType | None:
     if await get_type_by_name(group_chat_id, name):
         return None

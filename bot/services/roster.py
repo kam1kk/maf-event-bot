@@ -7,7 +7,7 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import LinkPreviewOptions
 
 from bot.db import repo
-from bot.keyboards import event_keyboard
+from bot.keyboards import event_keyboard, restore_keyboard
 from bot.services.render import render_event
 
 logger = logging.getLogger(__name__)
@@ -27,6 +27,11 @@ async def refresh_event_message(bot: Bot, event_id: int) -> None:
         if event.status == "active":
             has_guests = any(r.user_id is None for r in regs)
             keyboard = event_keyboard(event.id, has_guests)
+        elif event.status == "cancelled" and (
+            event.cancelled_by is None or event.cancelled_by == event.creator_id
+        ):
+            # отменённый самим создателем стол можно вернуть
+            keyboard = restore_keyboard(event.id)
         try:
             await bot.edit_message_text(
                 text,

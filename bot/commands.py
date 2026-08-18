@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 # - точечно для участников с правами через /promote (ChatMember —
 #   Telegram сам про них не знает, поэтому выдаём каждому отдельно).
 ADMIN_COMMANDS = [
+    BotCommand(command="new", description="Создать мероприятие (форма в личке)"),
     BotCommand(command="bind", description="Публиковать тип мероприятий в этой теме"),
     BotCommand(command="unbind", description="Снять привязку темы мероприятий"),
     BotCommand(command="bind_remind", description="Напоминания типа — в эту тему"),

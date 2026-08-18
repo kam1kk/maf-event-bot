@@ -124,6 +124,12 @@ def kick_keyboard(event_id: int, regs: list[Registration]) -> InlineKeyboardMark
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def restore_keyboard(event_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="♻ Восстановить стол", callback_data=f"rst:{event_id}")],
+    ])
+
+
 def cancel_confirm_keyboard(event_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [

@@ -84,6 +84,8 @@ class Event(Base):
     message_id: Mapped[int | None] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(String(16), default="active")  # active | closed | cancelled
     remind_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    # кто отменил стол; восстановление доступно, только если отменил сам создатель
+    cancelled_by: Mapped[int | None] = mapped_column(BigInteger)
 
 
 class Registration(Base):
@@ -140,6 +142,10 @@ async def init_db() -> None:
             await conn.exec_driver_sql("ALTER TABLE registrations ADD COLUMN username VARCHAR(64)")
         if "attached_to" not in columns:
             await conn.exec_driver_sql("ALTER TABLE registrations ADD COLUMN attached_to INTEGER")
+        result = await conn.exec_driver_sql("PRAGMA table_info(events)")
+        columns = [row[1] for row in result.fetchall()]
+        if columns and "cancelled_by" not in columns:
+            await conn.exec_driver_sql("ALTER TABLE events ADD COLUMN cancelled_by BIGINT")
         result = await conn.exec_driver_sql("PRAGMA table_info(groups)")
         columns = [row[1] for row in result.fetchall()]
         if columns and "only_admins_create" not in columns:

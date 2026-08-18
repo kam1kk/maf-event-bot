@@ -169,6 +169,12 @@ async def cmd_start_deeplink(message: Message, command: CommandObject, state: FS
         )
         return
 
+    if args.startswith("new_"):
+        # «Создать мероприятие» из темы группы
+        from bot.handlers.create import start_from_deeplink
+        await start_from_deeplink(message, state, bot, args)
+        return
+
     if args.startswith("mng_"):
         # запасной вход в меню управления, если личка была закрыта
         from bot.handlers.edit import send_manage_menu
