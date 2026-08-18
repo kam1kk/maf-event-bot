@@ -9,6 +9,14 @@ MEMBER_STATUSES = {"creator", "administrator", "member", "restricted"}
 TG_ADMIN_STATUSES = {"creator", "administrator"}
 
 
+async def is_member(bot: Bot, chat_id: int, user_id: int) -> bool:
+    try:
+        member = await bot.get_chat_member(chat_id, user_id)
+    except Exception:
+        return False
+    return member.status in MEMBER_STATUSES
+
+
 async def is_tg_admin(bot: Bot, chat_id: int, user_id: int) -> bool:
     """Админ самой группы Telegram (только они выдают/снимают права бота)."""
     try:

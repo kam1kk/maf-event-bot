@@ -49,6 +49,55 @@ async def _show_types(target: Message, state: FSMContext, group_chat_id: int, ed
         await target.answer(text, reply_markup=markup)
 
 
+async def _start_with_type(message: Message, state: FSMContext, event_type) -> None:
+    """Вход в форму с уже известным типом (deep-link из привязанной темы)."""
+    await state.update_data(
+        group_chat_id=event_type.group_chat_id,
+        type_id=event_type.id,
+        type_name=event_type.name,
+    )
+    await state.set_state(CreateForm.date_)
+    await message.answer(
+        f"Тип: <b>{escape(event_type.name)}</b>\nВыберите дату:",
+        reply_markup=kb.date_keyboard("cd"),
+    )
+
+
+async def start_from_deeplink(message: Message, state: FSMContext, bot: Bot, args: str) -> None:
+    """Переход «Создать мероприятие» из темы группы (payload new_t_/new_g_)."""
+    await state.clear()
+    await repo.get_or_create_user(message.from_user.id)
+
+    event_type = None
+    group_chat_id = None
+    try:
+        if args.startswith("new_t_"):
+            event_type = await repo.get_type(int(args[6:]))
+            group_chat_id = event_type.group_chat_id if event_type else None
+        elif args.startswith("new_g_"):
+            group_chat_id = int(args[6:])
+    except ValueError:
+        pass
+    if not group_chat_id:
+        await message.answer("Не понял ссылку — попробуйте /new.")
+        return
+
+    group = await repo.get_group(group_chat_id)
+    if not group or not await membership.is_member(bot, group_chat_id, message.from_user.id):
+        await message.answer("Вы не состоите в этой группе.")
+        return
+    if group.only_admins_create and not await membership.is_bot_admin(
+        bot, group_chat_id, message.from_user.id
+    ):
+        await message.answer("В этой группе создавать мероприятия могут только админы бота.")
+        return
+
+    if event_type and event_type.chat_id:
+        await _start_with_type(message, state, event_type)
+    else:
+        await _show_types(message, state, group_chat_id, edit=False)
+
+
 def _preview_text(data: dict) -> str:
     return (
         "Проверьте мероприятие:\n\n"

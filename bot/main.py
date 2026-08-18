@@ -9,6 +9,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import (
     BotCommand,
     BotCommandScopeAllChatAdministrators,
+    BotCommandScopeAllGroupChats,
     BotCommandScopeAllPrivateChats,
 )
 
@@ -66,6 +67,11 @@ async def main() -> None:
             BotCommand(command="settings", description="Типы мероприятий"),
         ],
         scope=BotCommandScopeAllPrivateChats(),
+    )
+    # рядовым участникам в группе подсказывается только /new
+    await bot.set_my_commands(
+        [BotCommand(command="new", description="Создать мероприятие (форма в личке)")],
+        scope=BotCommandScopeAllGroupChats(),
     )
     # подсказки при вводе «/» в группе — только у Telegram-админов;
     # рядовым участникам эти команды не показываются

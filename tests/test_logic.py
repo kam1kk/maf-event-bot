@@ -34,6 +34,11 @@ def test_smoke(tmp_path):
         assert await repo.get_type_by_name(GROUP, "Турнир") is None
         assert len(await repo.list_types(OTHER)) == 2
 
+        # поиск типа по теме (для /new из темы)
+        found = await repo.get_type_by_topic(GROUP, 42)
+        assert found and found.id == et.id
+        assert await repo.get_type_by_topic(GROUP, 999) is None
+
         # часовой пояс: без настройки — фолбэк, с настройкой — свой
         from bot.config import get_tz
         assert str(await repo.group_tz(GROUP)) == str(get_tz())
@@ -75,8 +80,12 @@ def test_smoke(tmp_path):
         text = render_event(empty, [])
         assert text.count("\n10.") == 1 and "Опоздавшие" not in text
 
-        cancelled = await repo.update_event(empty.id, status="cancelled")
+        cancelled = await repo.update_event(empty.id, status="cancelled", cancelled_by=1)
         assert "Стол отменен" in render_event(cancelled, [])
+        # восстановление: статус возвращается, отметка об отмене снимается
+        restored = await repo.update_event(empty.id, status="active", cancelled_by=None)
+        assert restored.status == "active" and restored.cancelled_by is None
+        assert "Стол отменен" not in render_event(restored, [])
 
         items = await repo.list_user_regs_on_active(3)
         assert len(items) == 1 and items[0][1].id == event.id

@@ -284,8 +284,40 @@ async def cb_cancel_confirm(callback: CallbackQuery, bot: Bot) -> None:
         await callback.answer()
         return
 
-    event = await repo.update_event(event_id, status="cancelled")
+    event = await repo.update_event(
+        event_id, status="cancelled", cancelled_by=callback.from_user.id
+    )
     scheduler.cancel_event_jobs(event_id)
     await roster.refresh_event_message(bot, event_id)
-    await callback.message.edit_text("Стол отменен ❌")
+    note = "Стол отменен ❌"
+    if callback.from_user.id == event.creator_id:
+        note += "\nПередумаете — под сообщением в теме есть кнопка «♻ Восстановить стол»."
+    await callback.message.edit_text(note)
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("rst:"))
+async def cb_restore(callback: CallbackQuery, bot: Bot) -> None:
+    event_id = int(callback.data.split(":")[1])
+    event = await repo.get_event(event_id)
+    if not event or event.status != "cancelled":
+        await callback.answer("Мероприятие не найдено или не отменено", show_alert=True)
+        return
+    if callback.from_user.id != event.creator_id:
+        await callback.answer("Восстановить стол может только его создатель", show_alert=True)
+        return
+    if event.cancelled_by is not None and event.cancelled_by != event.creator_id:
+        await callback.answer(
+            "Стол отменён админом — восстановление недоступно", show_alert=True
+        )
+        return
+    # день игры уже закончился — восстанавливать нечего
+    tz = await repo.group_tz(event.chat_id)
+    if datetime.combine(event.date_ + timedelta(days=1), datetime.min.time(), tzinfo=tz) <= datetime.now(tz):
+        await callback.answer("День этого мероприятия уже прошёл", show_alert=True)
+        return
+
+    event = await repo.update_event(event_id, status="active", cancelled_by=None)
+    await roster.refresh_event_message(bot, event_id)
+    await scheduler.schedule_event_jobs(event)
+    await callback.answer("Стол восстановлен ✅ Запись снова открыта")

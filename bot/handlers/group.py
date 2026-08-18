@@ -1,6 +1,12 @@
 from aiogram import Bot, F, Router
 from aiogram.filters import Command, CommandObject
-from aiogram.types import CallbackQuery, ChatMemberUpdated, Message
+from aiogram.types import (
+    CallbackQuery,
+    ChatMemberUpdated,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+)
 
 from bot.commands import set_member_hints
 from bot.db import repo
@@ -114,6 +120,30 @@ async def cb_unregister(callback: CallbackQuery, bot: Bot) -> None:
     event_id = int(callback.data.split(":")[1])
     ok, text = await roster.unregister(bot, event_id, callback.from_user.id)
     await callback.answer(text, show_alert=not ok)
+
+
+# ---------- создание мероприятия из темы ----------
+
+@router.message(Command("new"), F.chat.type.in_({"group", "supergroup"}))
+async def cmd_new_in_group(message: Message, bot: Bot) -> None:
+    """Форма создания живёт в личке (в теме её заполнять — мусорить), поэтому
+    даём кнопку-переход. Если тема привязана к типу — форма начнётся сразу с даты."""
+    group = await repo.ensure_group(message.chat.id, message.chat.title)
+    if group.only_admins_create and not await membership.is_bot_admin(
+        bot, message.chat.id, message.from_user.id
+    ):
+        await message.reply("В этой группе создавать мероприятия могут только админы бота.")
+        return
+    topic_type = await repo.get_type_by_topic(message.chat.id, message.message_thread_id)
+    payload = f"new_t_{topic_type.id}" if topic_type else f"new_g_{message.chat.id}"
+    me = await bot.get_me()
+    label = f"📝 Создать «{topic_type.name}»" if topic_type else "📝 Создать мероприятие"
+    await message.reply(
+        "Продолжим в личке — там заполним форму:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text=label, url=f"https://t.me/{me.username}?start={payload}")
+        ]]),
+    )
 
 
 # ---------- права админов бота ----------
