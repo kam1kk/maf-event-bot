@@ -95,6 +95,8 @@ class Registration(Base):
     added_by: Mapped[int] = mapped_column(BigInteger)
     nick: Mapped[str] = mapped_column(String(64))  # копия ника на момент записи
     username: Mapped[str | None] = mapped_column(String(64))  # @username на момент записи, для ссылки на профиль
+    # id записи хозяина: гость «через /» — в одной строке с ним (kam1kk/mirai)
+    attached_to: Mapped[int | None] = mapped_column(Integer)
     category: Mapped[str] = mapped_column(String(8), default="main")  # main | late
     arrive_time: Mapped[time | None] = mapped_column(Time)
     leave_time: Mapped[time | None] = mapped_column(Time)
@@ -136,6 +138,8 @@ async def init_db() -> None:
         columns = [row[1] for row in result.fetchall()]
         if "username" not in columns:
             await conn.exec_driver_sql("ALTER TABLE registrations ADD COLUMN username VARCHAR(64)")
+        if "attached_to" not in columns:
+            await conn.exec_driver_sql("ALTER TABLE registrations ADD COLUMN attached_to INTEGER")
         result = await conn.exec_driver_sql("PRAGMA table_info(groups)")
         columns = [row[1] for row in result.fetchall()]
         if columns and "only_admins_create" not in columns:

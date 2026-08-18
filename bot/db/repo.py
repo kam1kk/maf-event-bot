@@ -1,6 +1,6 @@
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import and_, delete, or_, select
+from sqlalchemy import and_, delete, or_, select, update
 
 from bot.config import get_tz
 from bot.db import models
@@ -319,11 +319,13 @@ async def event_has_guests(event_id: int) -> bool:
 
 
 async def add_reg(
-    event_id: int, user_id: int | None, added_by: int, nick: str, username: str | None = None
+    event_id: int, user_id: int | None, added_by: int, nick: str,
+    username: str | None = None, attached_to: int | None = None,
 ) -> Registration:
     async with S() as s:
         reg = Registration(
-            event_id=event_id, user_id=user_id, added_by=added_by, nick=nick, username=username
+            event_id=event_id, user_id=user_id, added_by=added_by, nick=nick,
+            username=username, attached_to=attached_to,
         )
         s.add(reg)
         await s.commit()
@@ -332,6 +334,10 @@ async def add_reg(
 
 async def delete_reg(reg_id: int) -> None:
     async with S() as s:
+        # друзья «через /» не исчезают вместе с хозяином, а становятся отдельными строками
+        await s.execute(
+            update(Registration).where(Registration.attached_to == reg_id).values(attached_to=None)
+        )
         await s.execute(delete(Registration).where(Registration.id == reg_id))
         await s.commit()
 

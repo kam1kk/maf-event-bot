@@ -129,6 +129,30 @@ async def cmd_start_deeplink(message: Message, command: CommandObject, state: FS
         )
         return
 
+    if args.startswith("frsl_"):
+        try:
+            event_id = int(args[5:])
+        except ValueError:
+            await message.answer(WELCOME)
+            return
+        event = await repo.get_event(event_id)
+        if not event or event.status != "active":
+            await message.answer("Запись на это мероприятие закрыта.")
+            return
+        own = await repo.get_reg(event_id, message.from_user.id)
+        if not own:
+            await message.answer(
+                "Сначала запишитесь сами — друг «через /» добавляется к вашей записи."
+            )
+            return
+        await state.set_state(FriendForm.nick)
+        await state.update_data(friend_event_id=event_id, slash=True)
+        await message.answer(
+            f"Введите ник друга — он попадёт в вашу строку: <b>{escape(own.nick)}/ник</b>:",
+            reply_markup=kb.cancel_friend_keyboard(),
+        )
+        return
+
     if args.startswith("unfriend_"):
         try:
             event_id = int(args[9:])
@@ -222,6 +246,21 @@ async def input_friend_nick(message: Message, state: FSMContext, bot: Bot) -> No
     if not event or event.status != "active":
         await message.answer("Запись на это мероприятие уже закрыта.")
         return
+    if data.get("slash"):
+        own = await repo.get_reg(event_id, message.from_user.id)
+        if not own:
+            # выписался, пока вводил ник
+            await message.answer(
+                "Вы не записаны на это мероприятие — запись «через /» невозможна."
+            )
+            return
+        await repo.add_reg(event_id, None, message.from_user.id, nick, attached_to=own.id)
+        await roster.refresh_event_message(bot, event_id)
+        await message.answer(
+            f"Записаны вместе: <b>{escape(own.nick)}/{escape(nick)}</b> ✅\n\n"
+            f"{render_summary(event)}"
+        )
+        return
     reg = await repo.add_reg(event_id, None, message.from_user.id, nick)
     await roster.refresh_event_message(bot, event_id)
     await message.answer(
@@ -284,11 +323,12 @@ async def cb_my_reg(callback: CallbackQuery, state: FSMContext) -> None:
     if not event or event.status != "active":
         await callback.answer("Запись на это мероприятие уже закрыта", show_alert=True)
         return
-    who = (
-        f"Ваш друг: <b>{escape(reg.nick)}</b>"
-        if reg.user_id is None
-        else f"Вы записаны как <b>{escape(reg.nick)}</b>"
-    )
+    if reg.user_id is None and reg.attached_to is not None:
+        who = f"Ваш друг: <b>{escape(reg.nick)}</b> (записан к вам через /)"
+    elif reg.user_id is None:
+        who = f"Ваш друг: <b>{escape(reg.nick)}</b>"
+    else:
+        who = f"Вы записаны как <b>{escape(reg.nick)}</b>"
     await callback.message.edit_text(
         f"{render_summary(event)}\n\n{who}. Что сделать?",
         reply_markup=kb.my_reg_menu_keyboard(reg),
@@ -319,6 +359,15 @@ async def cb_my_action(callback: CallbackQuery, state: FSMContext, bot: Bot) -> 
     event = await repo.get_event(reg.event_id)
     if not event or event.status != "active":
         await callback.answer("Запись на это мероприятие уже закрыта", show_alert=True)
+        return
+
+    # у друга «через /» своей строки нет — время задаётся только у хозяина
+    if reg.attached_to is not None and action in ("arrive", "leave", "reset"):
+        await callback.answer(
+            "У записи «через /» время общее с вашей. Чтобы задать своё — "
+            "выпишите друга и запишите отдельной строкой.",
+            show_alert=True,
+        )
         return
 
     if action == "arrive":
