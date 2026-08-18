@@ -10,6 +10,7 @@ from aiogram.types import CallbackQuery, Message
 
 from bot import config
 from bot import keyboards as kb
+from bot.commands import set_member_hints
 from bot.db import repo
 from bot.db.models import Group
 from bot.services import membership
@@ -160,6 +161,7 @@ async def cb_remove_admin(callback: CallbackQuery, bot: Bot) -> None:
         await callback.answer("Снимать права могут только администраторы группы", show_alert=True)
         return
     await repo.remove_group_admin(chat_id, user_id)
+    await set_member_hints(bot, chat_id, user_id, grant=False)
     admins = await repo.list_group_admins(chat_id)
     await callback.message.edit_text(
         "Права сняты ✅" + ("\n\nОставшиеся админы бота:" if admins else "\n\nВручную назначенных админов больше нет."),

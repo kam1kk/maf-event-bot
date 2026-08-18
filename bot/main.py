@@ -6,9 +6,14 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import BotCommand, BotCommandScopeAllChatAdministrators, BotCommandScopeAllPrivateChats
+from aiogram.types import (
+    BotCommand,
+    BotCommandScopeAllChatAdministrators,
+    BotCommandScopeAllPrivateChats,
+)
 
 from bot import config
+from bot.commands import ADMIN_COMMANDS, set_member_hints
 from bot.config import settings
 from bot.db import repo
 from bot.db.models import init_db
@@ -64,17 +69,12 @@ async def main() -> None:
     )
     # подсказки при вводе «/» в группе — только у Telegram-админов;
     # рядовым участникам эти команды не показываются
-    await bot.set_my_commands(
-        [
-            BotCommand(command="bind", description="Публиковать тип мероприятий в этой теме"),
-            BotCommand(command="unbind", description="Снять привязку темы мероприятий"),
-            BotCommand(command="bind_remind", description="Напоминания типа — в эту тему"),
-            BotCommand(command="unbind_remind", description="Отвязать тему напоминаний"),
-            BotCommand(command="promote", description="Выдать права админа бота (ответом на сообщение)"),
-            BotCommand(command="demote", description="Снять права админа бота (ответом на сообщение)"),
-        ],
-        scope=BotCommandScopeAllChatAdministrators(),
-    )
+    await bot.set_my_commands(ADMIN_COMMANDS, scope=BotCommandScopeAllChatAdministrators())
+    # у назначенных через /promote подсказки точечные (ChatMember) — восстанавливаем
+    # для выданных до этой версии; свежие выдаются прямо в /promote
+    for g in groups:
+        for admin in await repo.list_group_admins(g.chat_id):
+            await set_member_hints(bot, g.chat_id, admin.user_id, grant=True)
 
     sched.setup(bot)
     sched.scheduler.start()
