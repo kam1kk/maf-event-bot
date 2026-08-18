@@ -233,6 +233,22 @@ async def bind_type_remind(type_id: int, chat_id: int, topic_id: int | None) -> 
         await s.commit()
 
 
+async def unbind_type_topic(type_id: int) -> None:
+    async with S() as s:
+        et = await s.get(EventType, type_id)
+        et.chat_id = None
+        et.topic_id = None
+        await s.commit()
+
+
+async def unbind_type_remind(type_id: int) -> None:
+    async with S() as s:
+        et = await s.get(EventType, type_id)
+        et.remind_chat_id = None
+        et.remind_topic_id = None
+        await s.commit()
+
+
 # ---------- events ----------
 
 async def create_event(**kwargs) -> Event:

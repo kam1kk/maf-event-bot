@@ -6,7 +6,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import BotCommand, BotCommandScopeAllPrivateChats
+from aiogram.types import BotCommand, BotCommandScopeAllChatAdministrators, BotCommandScopeAllPrivateChats
 
 from bot import config
 from bot.config import settings
@@ -61,6 +61,19 @@ async def main() -> None:
             BotCommand(command="settings", description="Типы мероприятий"),
         ],
         scope=BotCommandScopeAllPrivateChats(),
+    )
+    # подсказки при вводе «/» в группе — только у Telegram-админов;
+    # рядовым участникам эти команды не показываются
+    await bot.set_my_commands(
+        [
+            BotCommand(command="bind", description="Публиковать тип мероприятий в этой теме"),
+            BotCommand(command="unbind", description="Снять привязку темы мероприятий"),
+            BotCommand(command="bind_remind", description="Напоминания типа — в эту тему"),
+            BotCommand(command="unbind_remind", description="Отвязать тему напоминаний"),
+            BotCommand(command="promote", description="Выдать права админа бота (ответом на сообщение)"),
+            BotCommand(command="demote", description="Снять права админа бота (ответом на сообщение)"),
+        ],
+        scope=BotCommandScopeAllChatAdministrators(),
     )
 
     sched.setup(bot)

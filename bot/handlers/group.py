@@ -164,10 +164,13 @@ async def cmd_demote(message: Message, bot: Bot) -> None:
 # ---------- привязка тем ----------
 
 @router.message(Command("bind"), F.chat.type.in_({"group", "supergroup"}))
-async def cmd_bind(message: Message, command: CommandObject) -> None:
+async def cmd_bind(message: Message, command: CommandObject, bot: Bot) -> None:
     # подстраховка, если бота добавили, пока он был выключен
     await repo.ensure_group(message.chat.id, message.chat.title)
     await repo.ensure_default_type(message.chat.id)
+    if not await membership.is_bot_admin(bot, message.chat.id, message.from_user.id):
+        await message.reply("Привязывать темы могут только админы бота.")
+        return
     name = (command.args or "").strip()
     if not name:
         await message.reply("Укажите тип: <code>/bind Мафия</code>")
@@ -182,10 +185,65 @@ async def cmd_bind(message: Message, command: CommandObject) -> None:
     await message.reply(f"Готово ✅ Мероприятия «{event_type.name}» будут публиковаться в этой теме.")
 
 
+@router.message(Command("unbind"), F.chat.type.in_({"group", "supergroup"}))
+async def cmd_unbind(message: Message, command: CommandObject, bot: Bot) -> None:
+    await repo.ensure_group(message.chat.id, message.chat.title)
+    if not await membership.is_bot_admin(bot, message.chat.id, message.from_user.id):
+        await message.reply("Снимать привязку тем могут только админы бота.")
+        return
+    name = (command.args or "").strip()
+    if not name:
+        await message.reply("Укажите тип: <code>/unbind Мафия</code>")
+        return
+    event_type = await repo.get_type_by_name(message.chat.id, name)
+    if not event_type:
+        await message.reply(
+            f"Тип «{name}» не найден в этой группе. Список типов и добавление — /settings в личке с ботом."
+        )
+        return
+    if not event_type.chat_id:
+        await message.reply(f"Тип «{event_type.name}» и так не привязан к теме.")
+        return
+    await repo.unbind_type_topic(event_type.id)
+    await message.reply(
+        f"Готово ✅ Привязка «{event_type.name}» снята. Уже опубликованные мероприятия "
+        f"не затронуты, а новые не получится создать, пока не сделаете /bind в нужной теме."
+    )
+
+
+@router.message(Command("unbind_remind"), F.chat.type.in_({"group", "supergroup"}))
+async def cmd_unbind_remind(message: Message, command: CommandObject, bot: Bot) -> None:
+    await repo.ensure_group(message.chat.id, message.chat.title)
+    if not await membership.is_bot_admin(bot, message.chat.id, message.from_user.id):
+        await message.reply("Снимать привязку тем могут только админы бота.")
+        return
+    name = (command.args or "").strip()
+    if not name:
+        await message.reply("Укажите тип: <code>/unbind_remind Мафия</code>")
+        return
+    event_type = await repo.get_type_by_name(message.chat.id, name)
+    if not event_type:
+        await message.reply(
+            f"Тип «{name}» не найден в этой группе. Список типов и добавление — /settings в личке с ботом."
+        )
+        return
+    if not event_type.remind_chat_id:
+        await message.reply(f"У «{event_type.name}» и так нет отдельной темы напоминаний.")
+        return
+    await repo.unbind_type_remind(event_type.id)
+    await message.reply(
+        f"Готово ✅ Отдельная тема напоминаний «{event_type.name}» отвязана — "
+        f"напоминания снова будут приходить в тему мероприятия."
+    )
+
+
 @router.message(Command("bind_remind"), F.chat.type.in_({"group", "supergroup"}))
-async def cmd_bind_remind(message: Message, command: CommandObject) -> None:
+async def cmd_bind_remind(message: Message, command: CommandObject, bot: Bot) -> None:
     await repo.ensure_group(message.chat.id, message.chat.title)
     await repo.ensure_default_type(message.chat.id)
+    if not await membership.is_bot_admin(bot, message.chat.id, message.from_user.id):
+        await message.reply("Привязывать темы могут только админы бота.")
+        return
     name = (command.args or "").strip()
     if not name:
         await message.reply("Укажите тип: <code>/bind_remind Мафия</code>")
