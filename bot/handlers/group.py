@@ -68,6 +68,25 @@ async def cb_add_friend(callback: CallbackQuery, bot: Bot) -> None:
     await callback.answer(url=f"https://t.me/{me.username}?start=friend_{event_id}")
 
 
+@router.callback_query(F.data.startswith("frsl:"))
+async def cb_add_friend_slash(callback: CallbackQuery, bot: Bot) -> None:
+    """Запись друга «через /» — в одну строку со своей записью (kam1kk/mirai).
+    Доступна только уже записанному: прикреплять не к чему, если своей записи нет."""
+    event_id = int(callback.data.split(":")[1])
+    event = await repo.get_event(event_id)
+    if not event or event.status != "active":
+        await callback.answer("Запись закрыта", show_alert=True)
+        return
+    if not await repo.get_reg(event_id, callback.from_user.id):
+        await callback.answer(
+            "Сначала запишитесь сами — друг «через /» добавляется к вашей записи",
+            show_alert=True,
+        )
+        return
+    me = await bot.get_me()
+    await callback.answer(url=f"https://t.me/{me.username}?start=frsl_{event_id}")
+
+
 @router.callback_query(F.data.startswith("unfriend:"))
 async def cb_remove_friend(callback: CallbackQuery, bot: Bot) -> None:
     event_id = int(callback.data.split(":")[1])
