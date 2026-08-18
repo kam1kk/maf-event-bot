@@ -2,6 +2,7 @@ from aiogram import Bot, F, Router
 from aiogram.filters import Command, CommandObject
 from aiogram.types import CallbackQuery, ChatMemberUpdated, Message
 
+from bot.commands import set_member_hints
 from bot.db import repo
 from bot.services import membership, roster
 
@@ -138,6 +139,7 @@ async def cmd_promote(message: Message, bot: Bot) -> None:
     await repo.ensure_group(message.chat.id, message.chat.title)
     name = target.full_name + (f" (@{target.username})" if target.username else "")
     if await repo.add_group_admin(message.chat.id, target.id, name, message.from_user.id):
+        await set_member_hints(bot, message.chat.id, target.id, grant=True)
         await message.reply(f"✅ {target.full_name} теперь админ бота в этой группе.")
     else:
         await message.reply(f"{target.full_name} уже админ бота в этой группе.")
@@ -156,6 +158,7 @@ async def cmd_demote(message: Message, bot: Bot) -> None:
         )
         return
     if await repo.remove_group_admin(message.chat.id, target.id):
+        await set_member_hints(bot, message.chat.id, target.id, grant=False)
         await message.reply(f"Права админа бота у {target.full_name} сняты.")
     else:
         await message.reply(f"У {target.full_name} нет выданных прав админа бота.")
