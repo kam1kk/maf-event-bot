@@ -132,6 +132,18 @@ def test_smoke(tmp_path):
         assert "SlashBro" in text and "/SlashBro" not in text
         assert (await repo.get_reg_by_id(slash.id)).attached_to is None
 
+        # отвязка тем: /unbind чистит тему мероприятий, /unbind_remind — тему напоминаний
+        await repo.bind_type_remind(et.id, GROUP, 77)
+        fresh = await repo.get_type(et.id)
+        assert fresh.chat_id == GROUP and fresh.remind_topic_id == 77
+        await repo.unbind_type_remind(et.id)
+        fresh = await repo.get_type(et.id)
+        assert fresh.remind_chat_id is None and fresh.remind_topic_id is None
+        assert fresh.chat_id == GROUP  # тема мероприятий не тронута
+        await repo.unbind_type_topic(et.id)
+        fresh = await repo.get_type(et.id)
+        assert fresh.chat_id is None and fresh.topic_id is None
+
         # настройки: сохранение и перезапись часового пояса
         assert await repo.get_setting("timezone") is None
         await repo.set_setting("timezone", "Asia/Yekaterinburg")
