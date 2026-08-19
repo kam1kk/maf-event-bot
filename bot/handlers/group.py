@@ -136,7 +136,7 @@ async def cmd_new_in_group(message: Message, bot: Bot, state: FSMContext) -> Non
         bot, message.chat.id, message.from_user.id
     )
     if not allowed:
-        await _deny_quietly(
+        await _private_reply(
             message, bot, "В этой группе создавать мероприятия могут только админы бота."
         )
         return
@@ -164,8 +164,8 @@ async def cmd_new_in_group(message: Message, bot: Bot, state: FSMContext) -> Non
     )
 
 
-async def _deny_quietly(message: Message, bot: Bot, note: str) -> None:
-    """Отказ без мусора в теме: команду удаляем, пояснение — в личку.
+async def _private_reply(message: Message, bot: Bot, note: str) -> None:
+    """Ответ на команду без мусора в теме: команду удаляем, текст — в личку.
     Если личка с ботом закрыта — молчим, в тему не пишем ничего."""
     try:
         await message.delete()
@@ -182,47 +182,47 @@ async def _deny_quietly(message: Message, bot: Bot, note: str) -> None:
 @router.message(Command("promote"), F.chat.type.in_({"group", "supergroup"}))
 async def cmd_promote(message: Message, bot: Bot) -> None:
     if not await membership.is_tg_admin(bot, message.chat.id, message.from_user.id):
-        await _deny_quietly(message, bot, "Выдавать права бота могут только администраторы группы.")
+        await _private_reply(message, bot, "Выдавать права бота могут только администраторы группы.")
         return
     target = message.reply_to_message.from_user if message.reply_to_message else None
     if not target:
-        await message.reply(
+        await _private_reply(message, bot,
             "Ответьте командой <code>/promote</code> на любое сообщение участника, "
             "которому выдаёте права админа бота."
         )
         return
     if target.is_bot:
-        await message.reply("Ботам права не нужны.")
+        await _private_reply(message, bot,"Ботам права не нужны.")
         return
     if await membership.is_tg_admin(bot, message.chat.id, target.id):
-        await message.reply(f"{target.full_name} — администратор группы, права бота у него уже есть.")
+        await _private_reply(message, bot,f"{target.full_name} — администратор группы, права бота у него уже есть.")
         return
     await repo.ensure_group(message.chat.id, message.chat.title)
     name = target.full_name + (f" (@{target.username})" if target.username else "")
     if await repo.add_group_admin(message.chat.id, target.id, name, message.from_user.id):
         await set_member_hints(bot, message.chat.id, target.id, grant=True)
-        await message.reply(f"✅ {target.full_name} теперь админ бота в этой группе.")
+        await _private_reply(message, bot,f"✅ {target.full_name} теперь админ бота в этой группе.")
     else:
-        await message.reply(f"{target.full_name} уже админ бота в этой группе.")
+        await _private_reply(message, bot,f"{target.full_name} уже админ бота в этой группе.")
 
 
 @router.message(Command("demote"), F.chat.type.in_({"group", "supergroup"}))
 async def cmd_demote(message: Message, bot: Bot) -> None:
     if not await membership.is_tg_admin(bot, message.chat.id, message.from_user.id):
-        await _deny_quietly(message, bot, "Снимать права бота могут только администраторы группы.")
+        await _private_reply(message, bot, "Снимать права бота могут только администраторы группы.")
         return
     target = message.reply_to_message.from_user if message.reply_to_message else None
     if not target:
-        await message.reply(
+        await _private_reply(message, bot,
             "Ответьте командой <code>/demote</code> на любое сообщение участника, "
             "у которого снимаете права админа бота."
         )
         return
     if await repo.remove_group_admin(message.chat.id, target.id):
         await set_member_hints(bot, message.chat.id, target.id, grant=False)
-        await message.reply(f"Права админа бота у {target.full_name} сняты.")
+        await _private_reply(message, bot,f"Права админа бота у {target.full_name} сняты.")
     else:
-        await message.reply(f"У {target.full_name} нет выданных прав админа бота.")
+        await _private_reply(message, bot,f"У {target.full_name} нет выданных прав админа бота.")
 
 
 # ---------- привязка тем ----------
@@ -233,43 +233,43 @@ async def cmd_bind(message: Message, command: CommandObject, bot: Bot) -> None:
     await repo.ensure_group(message.chat.id, message.chat.title)
     await repo.ensure_default_type(message.chat.id)
     if not await membership.is_bot_admin(bot, message.chat.id, message.from_user.id):
-        await _deny_quietly(message, bot, "Привязывать темы могут только админы бота.")
+        await _private_reply(message, bot, "Привязывать темы могут только админы бота.")
         return
     name = (command.args or "").strip()
     if not name:
-        await message.reply("Укажите тип: <code>/bind Мафия</code>")
+        await _private_reply(message, bot,"Укажите тип: <code>/bind Мафия</code>")
         return
     event_type = await repo.get_type_by_name(message.chat.id, name)
     if not event_type:
-        await message.reply(
+        await _private_reply(message, bot,
             f"Тип «{name}» не найден в этой группе. Список типов и добавление — /settings в личке с ботом."
         )
         return
     await repo.bind_type_topic(event_type.id, message.chat.id, message.message_thread_id)
-    await message.reply(f"Готово ✅ Мероприятия «{event_type.name}» будут публиковаться в этой теме.")
+    await _private_reply(message, bot,f"Готово ✅ Мероприятия «{event_type.name}» будут публиковаться в этой теме.")
 
 
 @router.message(Command("unbind"), F.chat.type.in_({"group", "supergroup"}))
 async def cmd_unbind(message: Message, command: CommandObject, bot: Bot) -> None:
     await repo.ensure_group(message.chat.id, message.chat.title)
     if not await membership.is_bot_admin(bot, message.chat.id, message.from_user.id):
-        await _deny_quietly(message, bot, "Снимать привязку тем могут только админы бота.")
+        await _private_reply(message, bot, "Снимать привязку тем могут только админы бота.")
         return
     name = (command.args or "").strip()
     if not name:
-        await message.reply("Укажите тип: <code>/unbind Мафия</code>")
+        await _private_reply(message, bot,"Укажите тип: <code>/unbind Мафия</code>")
         return
     event_type = await repo.get_type_by_name(message.chat.id, name)
     if not event_type:
-        await message.reply(
+        await _private_reply(message, bot,
             f"Тип «{name}» не найден в этой группе. Список типов и добавление — /settings в личке с ботом."
         )
         return
     if not event_type.chat_id:
-        await message.reply(f"Тип «{event_type.name}» и так не привязан к теме.")
+        await _private_reply(message, bot,f"Тип «{event_type.name}» и так не привязан к теме.")
         return
     await repo.unbind_type_topic(event_type.id)
-    await message.reply(
+    await _private_reply(message, bot,
         f"Готово ✅ Привязка «{event_type.name}» снята. Уже опубликованные мероприятия "
         f"не затронуты, а новые не получится создать, пока не сделаете /bind в нужной теме."
     )
@@ -279,23 +279,23 @@ async def cmd_unbind(message: Message, command: CommandObject, bot: Bot) -> None
 async def cmd_unbind_remind(message: Message, command: CommandObject, bot: Bot) -> None:
     await repo.ensure_group(message.chat.id, message.chat.title)
     if not await membership.is_bot_admin(bot, message.chat.id, message.from_user.id):
-        await _deny_quietly(message, bot, "Снимать привязку тем могут только админы бота.")
+        await _private_reply(message, bot, "Снимать привязку тем могут только админы бота.")
         return
     name = (command.args or "").strip()
     if not name:
-        await message.reply("Укажите тип: <code>/unbind_remind Мафия</code>")
+        await _private_reply(message, bot,"Укажите тип: <code>/unbind_remind Мафия</code>")
         return
     event_type = await repo.get_type_by_name(message.chat.id, name)
     if not event_type:
-        await message.reply(
+        await _private_reply(message, bot,
             f"Тип «{name}» не найден в этой группе. Список типов и добавление — /settings в личке с ботом."
         )
         return
     if not event_type.remind_chat_id:
-        await message.reply(f"У «{event_type.name}» и так нет отдельной темы напоминаний.")
+        await _private_reply(message, bot,f"У «{event_type.name}» и так нет отдельной темы напоминаний.")
         return
     await repo.unbind_type_remind(event_type.id)
-    await message.reply(
+    await _private_reply(message, bot,
         f"Готово ✅ Отдельная тема напоминаний «{event_type.name}» отвязана — "
         f"напоминания снова будут приходить в тему мероприятия."
     )
@@ -306,17 +306,17 @@ async def cmd_bind_remind(message: Message, command: CommandObject, bot: Bot) ->
     await repo.ensure_group(message.chat.id, message.chat.title)
     await repo.ensure_default_type(message.chat.id)
     if not await membership.is_bot_admin(bot, message.chat.id, message.from_user.id):
-        await _deny_quietly(message, bot, "Привязывать темы могут только админы бота.")
+        await _private_reply(message, bot, "Привязывать темы могут только админы бота.")
         return
     name = (command.args or "").strip()
     if not name:
-        await message.reply("Укажите тип: <code>/bind_remind Мафия</code>")
+        await _private_reply(message, bot,"Укажите тип: <code>/bind_remind Мафия</code>")
         return
     event_type = await repo.get_type_by_name(message.chat.id, name)
     if not event_type:
-        await message.reply(
+        await _private_reply(message, bot,
             f"Тип «{name}» не найден в этой группе. Список типов и добавление — /settings в личке с ботом."
         )
         return
     await repo.bind_type_remind(event_type.id, message.chat.id, message.message_thread_id)
-    await message.reply(f"Готово ✅ Напоминания «{event_type.name}» будут приходить в эту тему.")
+    await _private_reply(message, bot,f"Готово ✅ Напоминания «{event_type.name}» будут приходить в эту тему.")
