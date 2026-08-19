@@ -128,7 +128,8 @@ def test_smoke(tmp_path):
         own2 = await repo.get_reg(event.id, 2)
         slash = await repo.add_reg(event.id, None, 2, "SlashBro", attached_to=own2.id)
         text = render_event(event, await repo.get_regs(event.id))
-        assert "Nick2</a>/SlashBro" in text
+        # слэш с пробелами: «/SlashBro» вплотную Telegram подсветил бы как команду
+        assert "Nick2</a> / SlashBro" in text
         pair_line = next(l for l in text.splitlines() if "SlashBro" in l)
         assert pair_line.startswith("2. ")  # пара занимает один номер
         assert next(l for l in text.splitlines() if "Nick3" in l).startswith("3. ")

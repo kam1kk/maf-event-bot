@@ -5,6 +5,7 @@ from aiogram import Bot, F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.storage.base import StorageKey
 from aiogram.types import CallbackQuery, LinkPreviewOptions, Message
 
 from bot import keyboards as kb
@@ -61,6 +62,44 @@ async def _start_with_type(message: Message, state: FSMContext, event_type) -> N
         f"Тип: <b>{escape(event_type.name)}</b>\nВыберите дату:",
         reply_markup=kb.date_keyboard("cd"),
     )
+
+
+async def start_in_dm(bot: Bot, storage, user_id: int, group_chat_id: int, event_type=None) -> bool:
+    """Запуск формы прямо в личке — для /new из темы группы, без сообщений в теме.
+    False — личка с ботом закрыта (человек не нажимал Start)."""
+    if event_type and event_type.chat_id:
+        text = f"Тип: <b>{escape(event_type.name)}</b>\nВыберите дату:"
+        markup = kb.date_keyboard("cd")
+    else:
+        event_type = None
+        types = await repo.list_types(group_chat_id)
+        if not types:
+            await repo.ensure_default_type(group_chat_id)
+            types = await repo.list_types(group_chat_id)
+        text = "Выберите тип мероприятия:"
+        markup = kb.types_keyboard(types)
+
+    try:
+        await bot.send_message(user_id, text, reply_markup=markup)
+    except Exception:
+        return False
+
+    # FSM-контекст лички собираем вручную: хендлер-инициатор живёт в контексте группы
+    state = FSMContext(
+        storage=storage, key=StorageKey(bot_id=bot.id, chat_id=user_id, user_id=user_id)
+    )
+    await state.clear()
+    if event_type:
+        await state.update_data(
+            group_chat_id=event_type.group_chat_id,
+            type_id=event_type.id,
+            type_name=event_type.name,
+        )
+        await state.set_state(CreateForm.date_)
+    else:
+        await state.update_data(group_chat_id=group_chat_id)
+        await state.set_state(CreateForm.type_)
+    return True
 
 
 async def start_from_deeplink(message: Message, state: FSMContext, bot: Bot, args: str) -> None:

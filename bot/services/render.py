@@ -18,8 +18,9 @@ def _reg_name(reg: Registration) -> str:
 
 
 def reg_line(reg: Registration, attached: list[Registration] | None = None) -> str:
-    # друзья «через /» — в одной строке с хозяином: kam1kk/mirai
-    parts = ["/".join([_reg_name(r) for r in [reg, *(attached or [])]])]
+    # друзья «через /» — в одной строке с хозяином: kam1kk / mirai
+    # слэш отделяется пробелами: «/ник» вплотную Telegram подсвечивает как команду бота
+    parts = [" / ".join([_reg_name(r) for r in [reg, *(attached or [])]])]
     if reg.arrive_time:
         parts.append(f"(придёт к {fmt_time(reg.arrive_time)})")
     if reg.leave_time:
