@@ -135,19 +135,17 @@ async def cmd_new_in_group(message: Message, bot: Bot, state: FSMContext) -> Non
     allowed = not group.only_admins_create or await membership.is_bot_admin(
         bot, message.chat.id, message.from_user.id
     )
+    if not allowed:
+        await _deny_quietly(
+            message, bot, "В этой группе создавать мероприятия могут только админы бота."
+        )
+        return
+
     # убираем команду из темы (нужно админское право «удалять сообщения»)
     try:
         await message.delete()
     except Exception:
         pass
-
-    if not allowed:
-        note = "В этой группе создавать мероприятия могут только админы бота."
-        try:
-            await bot.send_message(message.from_user.id, note)
-        except Exception:
-            await message.answer(note)
-        return
 
     await repo.get_or_create_user(message.from_user.id)
     topic_type = await repo.get_type_by_topic(message.chat.id, message.message_thread_id)
@@ -166,12 +164,25 @@ async def cmd_new_in_group(message: Message, bot: Bot, state: FSMContext) -> Non
     )
 
 
+async def _deny_quietly(message: Message, bot: Bot, note: str) -> None:
+    """Отказ без мусора в теме: команду удаляем, пояснение — в личку.
+    Если личка с ботом закрыта — молчим, в тему не пишем ничего."""
+    try:
+        await message.delete()
+    except Exception:
+        pass
+    try:
+        await bot.send_message(message.from_user.id, note)
+    except Exception:
+        pass
+
+
 # ---------- права админов бота ----------
 
 @router.message(Command("promote"), F.chat.type.in_({"group", "supergroup"}))
 async def cmd_promote(message: Message, bot: Bot) -> None:
     if not await membership.is_tg_admin(bot, message.chat.id, message.from_user.id):
-        await message.reply("Выдавать права бота могут только администраторы группы.")
+        await _deny_quietly(message, bot, "Выдавать права бота могут только администраторы группы.")
         return
     target = message.reply_to_message.from_user if message.reply_to_message else None
     if not target:
@@ -198,7 +209,7 @@ async def cmd_promote(message: Message, bot: Bot) -> None:
 @router.message(Command("demote"), F.chat.type.in_({"group", "supergroup"}))
 async def cmd_demote(message: Message, bot: Bot) -> None:
     if not await membership.is_tg_admin(bot, message.chat.id, message.from_user.id):
-        await message.reply("Снимать права бота могут только администраторы группы.")
+        await _deny_quietly(message, bot, "Снимать права бота могут только администраторы группы.")
         return
     target = message.reply_to_message.from_user if message.reply_to_message else None
     if not target:
@@ -222,7 +233,7 @@ async def cmd_bind(message: Message, command: CommandObject, bot: Bot) -> None:
     await repo.ensure_group(message.chat.id, message.chat.title)
     await repo.ensure_default_type(message.chat.id)
     if not await membership.is_bot_admin(bot, message.chat.id, message.from_user.id):
-        await message.reply("Привязывать темы могут только админы бота.")
+        await _deny_quietly(message, bot, "Привязывать темы могут только админы бота.")
         return
     name = (command.args or "").strip()
     if not name:
@@ -242,7 +253,7 @@ async def cmd_bind(message: Message, command: CommandObject, bot: Bot) -> None:
 async def cmd_unbind(message: Message, command: CommandObject, bot: Bot) -> None:
     await repo.ensure_group(message.chat.id, message.chat.title)
     if not await membership.is_bot_admin(bot, message.chat.id, message.from_user.id):
-        await message.reply("Снимать привязку тем могут только админы бота.")
+        await _deny_quietly(message, bot, "Снимать привязку тем могут только админы бота.")
         return
     name = (command.args or "").strip()
     if not name:
@@ -268,7 +279,7 @@ async def cmd_unbind(message: Message, command: CommandObject, bot: Bot) -> None
 async def cmd_unbind_remind(message: Message, command: CommandObject, bot: Bot) -> None:
     await repo.ensure_group(message.chat.id, message.chat.title)
     if not await membership.is_bot_admin(bot, message.chat.id, message.from_user.id):
-        await message.reply("Снимать привязку тем могут только админы бота.")
+        await _deny_quietly(message, bot, "Снимать привязку тем могут только админы бота.")
         return
     name = (command.args or "").strip()
     if not name:
@@ -295,7 +306,7 @@ async def cmd_bind_remind(message: Message, command: CommandObject, bot: Bot) ->
     await repo.ensure_group(message.chat.id, message.chat.title)
     await repo.ensure_default_type(message.chat.id)
     if not await membership.is_bot_admin(bot, message.chat.id, message.from_user.id):
-        await message.reply("Привязывать темы могут только админы бота.")
+        await _deny_quietly(message, bot, "Привязывать темы могут только админы бота.")
         return
     name = (command.args or "").strip()
     if not name:
