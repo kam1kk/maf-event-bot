@@ -10,7 +10,7 @@ from aiogram.types import CallbackQuery, LinkPreviewOptions, Message
 
 from bot import keyboards as kb
 from bot.db import repo
-from bot.services import membership, scheduler
+from bot.services import membership, pin, scheduler
 from bot.services.render import render_event
 from bot.utils import fmt_date, fmt_time, parse_date, parse_time
 
@@ -327,6 +327,8 @@ async def cb_publish(callback: CallbackQuery, state: FSMContext, bot: Bot) -> No
 
     event = await repo.update_event(event.id, message_id=posted.message_id)
     await scheduler.schedule_event_jobs(event)
+    # новый стол мог оказаться ближайшим — пересобираем закреп темы
+    await pin.refresh_for_event(bot, event)
     await state.clear()
     await callback.message.edit_text("Мероприятие опубликовано ✅\nУправление — кнопка «⚙ Управление» под списком.")
     await callback.answer()

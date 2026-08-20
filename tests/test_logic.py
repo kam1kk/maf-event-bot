@@ -8,10 +8,15 @@ def test_smoke(tmp_path):
     os.environ["DB_PATH"] = str(tmp_path / "test.db")
     os.environ.setdefault("TZ", "Europe/Moscow")
 
+    from bot.config import settings
     from bot.db import repo
     from bot.db.models import init_db
     from bot.services.render import render_event
     from bot.utils import parse_date, parse_time, today
+
+    # config читает DB_PATH при импорте — если модуль уже импортирован другим тестом,
+    # env не подействует, поэтому путь ставим и напрямую
+    settings.db_path = os.environ["DB_PATH"]
 
     GROUP = -1001234567890
 
@@ -153,6 +158,60 @@ def test_smoke(tmp_path):
         await repo.unbind_type_topic(et.id)
         fresh = await repo.get_type(et.id)
         assert fresh.chat_id is None and fresh.topic_id is None
+
+        # закреп темы: ближайшее по дате-времени активное мероприятие
+        PIN_TOPIC = 55
+        far = await repo.create_event(
+            type_id=et.id, type_name=et.name, date_=date(2030, 9, 20), time_=time(19, 0),
+            place="Там", host="Он", creator_id=1, chat_id=GROUP, topic_id=PIN_TOPIC,
+            message_id=1001,
+        )
+        assert (await repo.nearest_active_event(GROUP, PIN_TOPIC)).id == far.id
+        near = await repo.create_event(
+            type_id=et.id, type_name=et.name, date_=date(2030, 9, 10), time_=time(19, 0),
+            place="Тут", host="Он", creator_id=1, chat_id=GROUP, topic_id=PIN_TOPIC,
+            message_id=1002,
+        )
+        assert (await repo.nearest_active_event(GROUP, PIN_TOPIC)).id == near.id
+        # в один день ближе тот, кто начинается раньше
+        earlier = await repo.create_event(
+            type_id=et.id, type_name=et.name, date_=date(2030, 9, 10), time_=time(15, 0),
+            place="Тут", host="Он", creator_id=1, chat_id=GROUP, topic_id=PIN_TOPIC,
+            message_id=1003,
+        )
+        assert (await repo.nearest_active_event(GROUP, PIN_TOPIC)).id == earlier.id
+        # неопубликованное (без message_id) закреплять нечем
+        await repo.create_event(
+            type_id=et.id, type_name=et.name, date_=date(2030, 9, 1), time_=time(12, 0),
+            place="Тут", host="Он", creator_id=1, chat_id=GROUP, topic_id=PIN_TOPIC,
+        )
+        assert (await repo.nearest_active_event(GROUP, PIN_TOPIC)).id == earlier.id
+        # отменённое и закрытое выпадают, очередь переходит следующему
+        await repo.update_event(earlier.id, status="cancelled")
+        assert (await repo.nearest_active_event(GROUP, PIN_TOPIC)).id == near.id
+        await repo.update_event(near.id, status="closed")
+        assert (await repo.nearest_active_event(GROUP, PIN_TOPIC)).id == far.id
+        # темы независимы: в соседней теме своих мероприятий нет
+        assert await repo.nearest_active_event(GROUP, PIN_TOPIC + 1) is None
+        # восстановление стола возвращает его в очередь
+        await repo.update_event(earlier.id, status="active")
+        assert (await repo.nearest_active_event(GROUP, PIN_TOPIC)).id == earlier.id
+
+        # что закреплено — помним по теме, чтобы снять свой прежний пин
+        assert await repo.get_topic_pin(GROUP, PIN_TOPIC) is None
+        await repo.set_topic_pin(GROUP, PIN_TOPIC, earlier.id, 1003)
+        pin = await repo.get_topic_pin(GROUP, PIN_TOPIC)
+        assert pin.event_id == earlier.id and pin.message_id == 1003
+        assert await repo.get_topic_pin(GROUP, PIN_TOPIC + 1) is None  # соседняя тема — своя строка
+        await repo.set_topic_pin(GROUP, PIN_TOPIC, far.id, 1001)  # перезапись, а не второй пин
+        pin = await repo.get_topic_pin(GROUP, PIN_TOPIC)
+        assert pin.event_id == far.id and pin.message_id == 1001
+        await repo.clear_topic_pin(GROUP, PIN_TOPIC)
+        assert await repo.get_topic_pin(GROUP, PIN_TOPIC) is None
+        # общий чат группы (topic_id None) — отдельная строка, не путается с темами
+        await repo.set_topic_pin(GROUP, None, far.id, 1001)
+        assert (await repo.get_topic_pin(GROUP, None)).message_id == 1001
+        assert await repo.get_topic_pin(GROUP, PIN_TOPIC) is None
 
         # настройки: сохранение и перезапись часового пояса
         assert await repo.get_setting("timezone") is None

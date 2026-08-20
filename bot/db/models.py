@@ -107,6 +107,18 @@ class Registration(Base):
     )
 
 
+class TopicPin(Base):
+    """Что бот закрепил в теме — чтобы снять свой прежний пин при пересборке.
+    Одна строка на тему (chat_id + topic_id); topic_id None — общий чат группы."""
+    __tablename__ = "topic_pins"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger)
+    topic_id: Mapped[int | None] = mapped_column(Integer)
+    event_id: Mapped[int] = mapped_column(Integer)
+    message_id: Mapped[int] = mapped_column(Integer)
+
+
 engine = None
 Session: async_sessionmaker[AsyncSession] | None = None
 

@@ -8,7 +8,7 @@ from aiogram.types import CallbackQuery, Message
 
 from bot import keyboards as kb
 from bot.db import repo
-from bot.services import membership, roster, scheduler
+from bot.services import membership, pin, roster, scheduler
 from bot.services.render import render_summary
 from bot.utils import fmt_date, fmt_time, parse_date, parse_time
 
@@ -73,6 +73,8 @@ async def _after_edit(bot: Bot, message: Message, event_id: int, note: str) -> N
     event = await repo.get_event(event_id)
     await roster.refresh_event_message(bot, event_id)
     await scheduler.reschedule(event)
+    # дата или время могли сменить ближайшее мероприятие темы
+    await pin.refresh_for_event(bot, event)
     await message.answer(
         f"{note}\n\n{render_summary(event)}",
         reply_markup=kb.manage_keyboard(event),
@@ -289,6 +291,7 @@ async def cb_cancel_confirm(callback: CallbackQuery, bot: Bot) -> None:
     )
     scheduler.cancel_event_jobs(event_id)
     await roster.refresh_event_message(bot, event_id)
+    await pin.refresh_for_event(bot, event)
     note = "Стол отменен ❌"
     if callback.from_user.id == event.creator_id:
         note += "\nПередумаете — под сообщением в теме есть кнопка «♻ Восстановить стол»."
@@ -320,4 +323,5 @@ async def cb_restore(callback: CallbackQuery, bot: Bot) -> None:
     event = await repo.update_event(event_id, status="active", cancelled_by=None)
     await roster.refresh_event_message(bot, event_id)
     await scheduler.schedule_event_jobs(event)
+    await pin.refresh_for_event(bot, event)
     await callback.answer("Стол восстановлен ✅ Запись снова открыта")

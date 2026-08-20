@@ -8,7 +8,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from bot.config import get_tz
 from bot.db import repo
 from bot.db.models import Event
-from bot.services import roster
+from bot.services import pin, roster
 from bot.utils import fmt_time, message_link
 
 logger = logging.getLogger(__name__)
@@ -68,6 +68,7 @@ async def close_event(event_id: int) -> None:
         return
     await repo.update_event(event_id, status="closed")
     await roster.refresh_event_message(_bot, event_id)
+    await pin.refresh_for_event(_bot, event)
     logger.info("Запись на событие %s закрыта (конец дня проведения)", event_id)
 
 
@@ -100,11 +101,18 @@ async def send_reminder(event_id: int) -> None:
 
 
 async def restore_jobs() -> None:
-    """При старте бота восстанавливаем задачи по активным событиям.
+    """При старте бота восстанавливаем задачи по активным событиям и закрепы тем.
     Если время закрытия прошло, пока бот лежал, — закрываем сразу."""
+    topics: set[tuple[int, int | None]] = set()
     for event in await repo.list_active_events():
         tz = await repo.group_tz(event.chat_id)
         if _close_at(event, tz) <= datetime.now(tz):
-            await close_event(event.id)
+            await close_event(event.id)  # закрытие само пересоберёт закреп темы
+        elif event.chat_id:
+            await schedule_event_jobs(event)
+            topics.add((event.chat_id, event.topic_id))
         else:
             await schedule_event_jobs(event)
+    # пины могли устареть, пока бот лежал (или ещё не расставлялись — первый запуск версии)
+    for chat_id, topic_id in topics:
+        await pin.refresh_topic_pin(_bot, chat_id, topic_id)

@@ -4,7 +4,9 @@ from sqlalchemy import and_, delete, or_, select, update
 
 from bot.config import get_tz
 from bot.db import models
-from bot.db.models import AppSetting, Event, EventType, Group, GroupAdmin, Registration, User
+from bot.db.models import (
+    AppSetting, Event, EventType, Group, GroupAdmin, Registration, TopicPin, User,
+)
 
 
 def S():
@@ -295,6 +297,55 @@ async def list_active_events(chat_id: int | None = None) -> list[Event]:
             query = query.where(Event.chat_id == chat_id)
         result = await s.execute(query.order_by(Event.date_, Event.time_))
         return list(result.scalars().all())
+
+
+async def nearest_active_event(chat_id: int, topic_id: int | None) -> Event | None:
+    """Ближайшее по дате и времени активное мероприятие темы — кандидат на закрепление.
+    Опубликованные (с message_id): закреплять нечего, пока сообщения нет."""
+    async with S() as s:
+        query = select(Event).where(
+            Event.status == "active",
+            Event.chat_id == chat_id,
+            Event.message_id.is_not(None),
+            Event.topic_id.is_(None) if topic_id is None else Event.topic_id == topic_id,
+        )
+        result = await s.execute(query.order_by(Event.date_, Event.time_, Event.id).limit(1))
+        return result.scalars().first()
+
+
+# ---------- закреплённые сообщения тем ----------
+
+def _topic_filter(chat_id: int, topic_id: int | None):
+    return (
+        TopicPin.chat_id == chat_id,
+        TopicPin.topic_id.is_(None) if topic_id is None else TopicPin.topic_id == topic_id,
+    )
+
+
+async def get_topic_pin(chat_id: int, topic_id: int | None) -> TopicPin | None:
+    async with S() as s:
+        result = await s.execute(select(TopicPin).where(*_topic_filter(chat_id, topic_id)))
+        return result.scalars().first()
+
+
+async def set_topic_pin(chat_id: int, topic_id: int | None, event_id: int, message_id: int) -> None:
+    async with S() as s:
+        result = await s.execute(select(TopicPin).where(*_topic_filter(chat_id, topic_id)))
+        pin = result.scalars().first()
+        if pin:
+            pin.event_id = event_id
+            pin.message_id = message_id
+        else:
+            s.add(TopicPin(
+                chat_id=chat_id, topic_id=topic_id, event_id=event_id, message_id=message_id
+            ))
+        await s.commit()
+
+
+async def clear_topic_pin(chat_id: int, topic_id: int | None) -> None:
+    async with S() as s:
+        await s.execute(delete(TopicPin).where(*_topic_filter(chat_id, topic_id)))
+        await s.commit()
 
 
 # ---------- registrations ----------
