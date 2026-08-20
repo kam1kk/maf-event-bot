@@ -10,7 +10,7 @@ from bot import keyboards as kb
 from bot.db import repo
 from bot.services import roster
 from bot.services.render import render_summary
-from bot.utils import clean_nick, parse_time
+from bot.utils import clean_nick, fmt_time, parse_time
 
 router = Router()
 router.message.filter(F.chat.type == "private")
@@ -406,13 +406,29 @@ async def cb_my_action(callback: CallbackQuery, state: FSMContext, bot: Bot) -> 
 
 @router.message(RegTimeForm.arrive, F.text)
 async def input_arrive(message: Message, state: FSMContext, bot: Bot) -> None:
+    data = await state.get_data()
+    reg_id = data["reg_id"]
     t = parse_time(message.text)
     if not t:
-        await message.answer("Не понял время. Формат: <b>ЧЧ:ММ</b>, например 19:30")
+        await message.answer(
+            "Не понял время. Формат: <b>ЧЧ:ММ</b>, например 19:30",
+            reply_markup=kb.back_to_reg_keyboard(reg_id),
+        )
         return
-    data = await state.get_data()
+    reg = await repo.get_reg_by_id(reg_id)
+    event = await repo.get_event(reg.event_id) if reg else None
+    if event and t <= event.time_:
+        # «приду позже» раньше начала — не опоздание; состав определяется временем стола
+        await message.answer(
+            f"Мероприятие начинается в <b>{fmt_time(event.time_)}</b> — "
+            f"время опоздания должно быть позже начала.\n"
+            f"Введите время после {fmt_time(event.time_)}, "
+            f"а если успеваете вовремя — вернитесь назад.",
+            reply_markup=kb.back_to_reg_keyboard(reg_id),
+        )
+        return
     await state.clear()
-    reg = await repo.update_reg(data["reg_id"], category="late", arrive_time=t)
+    reg = await repo.update_reg(reg_id, category="late", arrive_time=t)
     if reg:
         await roster.refresh_event_message(bot, reg.event_id)
         note = (
