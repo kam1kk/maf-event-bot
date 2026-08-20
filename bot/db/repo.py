@@ -1,3 +1,4 @@
+from datetime import time
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import and_, delete, or_, select, update
@@ -430,6 +431,30 @@ async def delete_reg(reg_id: int) -> None:
         )
         await s.execute(delete(Registration).where(Registration.id == reg_id))
         await s.commit()
+
+
+async def promote_on_time_regs(event_id: int, start: time) -> list[Registration]:
+    """Опоздавшие, чьё время прихода не позже нового начала, возвращаются в
+    основной состав: время стола перенесли — по факту они успевают вовремя.
+    Пометка «до ...» (уйдёт раньше) при этом не трогается."""
+    async with S() as s:
+        result = await s.execute(
+            select(Registration)
+            .where(
+                Registration.event_id == event_id,
+                Registration.category == "late",
+                Registration.arrive_time.is_not(None),
+            )
+            .order_by(Registration.id)
+        )
+        # сравниваем в питоне: в SQLite время лежит строкой, лишних сюрпризов не надо
+        promoted = [r for r in result.scalars().all() if r.arrive_time <= start]
+        for reg in promoted:
+            reg.category = "main"
+            reg.arrive_time = None
+        if promoted:
+            await s.commit()
+        return promoted
 
 
 async def update_reg(reg_id: int, **fields) -> Registration | None:

@@ -215,8 +215,15 @@ async def input_edit_time(message: Message, state: FSMContext, bot: Bot) -> None
         return
     data = await state.get_data()
     await state.clear()
-    await repo.update_event(data["event_id"], time_=new_time)
-    await _after_edit(bot, message, data["event_id"], f"Время изменено: <b>{fmt_time(new_time)}</b> ✅")
+    event_id = data["event_id"]
+    await repo.update_event(event_id, time_=new_time)
+    # стол сдвинули — кто «опаздывал» к этому времени или раньше, теперь успевает
+    promoted = await repo.promote_on_time_regs(event_id, new_time)
+    note = f"Время изменено: <b>{fmt_time(new_time)}</b> ✅"
+    if promoted:
+        names = ", ".join(escape(reg.nick) for reg in promoted)
+        note += f"\nУспевают вовремя, перенёс в основной состав: <b>{names}</b>"
+    await _after_edit(bot, message, event_id, note)
 
 
 @router.message(EditForm.place, F.text, F.chat.type == "private")
