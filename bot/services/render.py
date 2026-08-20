@@ -69,7 +69,8 @@ def render_event(event: Event, regs: list[Registration]) -> str:
 def render_guests(regs: list[Registration], names: dict[int, str]) -> str:
     """Кто кого записал — для создателя мероприятия и админов бота.
     names: tg_id записавшего → его имя (ник из записи на этом же мероприятии
-    или сохранённый игровой ник); кого нет в словаре — показываем по id."""
+    или сохранённый игровой ник); кого нет в словаре — показываем «id N»,
+    но тоже ссылкой на профиль."""
     ids = {r.id for r in regs}
     guests = [r for r in regs if r.user_id is None]
     if not guests:
@@ -77,10 +78,8 @@ def render_guests(regs: list[Registration], names: dict[int, str]) -> str:
     lines = ["<b>Кто записал друзей:</b>", ""]
     for reg in guests:
         name = names.get(reg.added_by)
-        who = (
-            f'<a href="tg://user?id={reg.added_by}">{escape(name)}</a>'
-            if name else f"id {reg.added_by}"
-        )
+        label = escape(name) if name else f"id {reg.added_by}"
+        who = f'<a href="tg://user?id={reg.added_by}">{label}</a>'
         # «через /» — только пока друг реально в строке хозяина; если хозяин
         # выписался, друг стал самостоятельной записью, а записавший тот же
         mark = " (через /)" if reg.attached_to is not None and reg.attached_to in ids else ""

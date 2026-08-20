@@ -165,11 +165,11 @@ def test_smoke(tmp_path):
         text = render_guests(regs, names)
         assert '<b>SlashBro</b> — записал <a href="tg://user?id=2">Nick2</a>' in text
         assert "(через /)" not in text
-        # записавший без сохранённого ника — показываем по id
+        # записавший без сохранённого ника — вместо имени id, но тоже ссылкой
         await repo.add_reg(event.id, None, 777, "Гость777")
         regs = await repo.get_regs(event.id)
         text = render_guests(regs, await guest_author_names(regs))
-        assert "<b>Гость777</b> — записал id 777" in text
+        assert '<b>Гость777</b> — записал <a href="tg://user?id=777">id 777</a>' in text
         assert render_guests([], {}).startswith("Друзей")
 
         # отвязка тем: /unbind чистит тему мероприятий, /unbind_remind — тему напоминаний
