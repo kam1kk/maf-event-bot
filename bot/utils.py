@@ -4,7 +4,12 @@ from datetime import date, datetime, time
 from bot.config import get_tz
 
 DATE_RE = re.compile(r"(\d{1,2})[.\-/](\d{1,2})(?:[.\-/](\d{2,4}))?")
-TIME_RE = re.compile(r"(\d{1,2})[:.](\d{2})")
+# «21:15», «21.15», «21-15», «21 15» — час и минуты через любой разделитель
+TIME_HM_RE = re.compile(r"(\d{1,2})(?:\s*[:.,\-]\s*|\s+)(\d{1,2})")
+# «2115», «930» — без разделителя
+TIME_COMPACT_RE = re.compile(r"(\d{1,2})(\d{2})")
+# «21» — только час, минуты нулевые
+TIME_H_RE = re.compile(r"(\d{1,2})")
 
 
 def today() -> date:
@@ -40,11 +45,18 @@ def parse_date(text: str, base: date | None = None) -> date | None:
 
 
 def parse_time(text: str) -> time | None:
-    """Разбирает '19:00', '9:30', '19.00'."""
-    m = TIME_RE.fullmatch(text.strip())
-    if not m:
-        return None
-    hour, minute = int(m.group(1)), int(m.group(2))
+    """Разбирает '19:00', '9:30', '19.00', '19-00', '19 30', '1930', '19' (→ 19:00)."""
+    raw = " ".join(text.split())
+    for pattern in (TIME_HM_RE, TIME_COMPACT_RE):
+        m = pattern.fullmatch(raw)
+        if m:
+            hour, minute = int(m.group(1)), int(m.group(2))
+            break
+    else:
+        m = TIME_H_RE.fullmatch(raw)
+        if not m:
+            return None
+        hour, minute = int(m.group(1)), 0
     if hour > 23 or minute > 59:
         return None
     return time(hour, minute)
