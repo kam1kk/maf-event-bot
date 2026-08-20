@@ -45,6 +45,17 @@ async def refresh_event_message(bot: Bot, event_id: int) -> None:
                 logger.warning("Не удалось обновить сообщение события %s: %s", event_id, e)
 
 
+async def guest_author_names(regs: list) -> dict[int, str]:
+    """Имена тех, кто записывал друзей на мероприятие: ник из их собственной
+    записи здесь же, иначе сохранённый игровой ник (записавший мог выписаться)."""
+    adders = {r.added_by for r in regs if r.user_id is None}
+    names = {r.user_id: r.nick for r in regs if r.user_id in adders}
+    missing = adders - set(names)
+    if missing:
+        names.update(await repo.get_nicks(missing))
+    return names
+
+
 async def register(
     bot: Bot, event_id: int, user_id: int, nick: str, username: str | None = None
 ) -> tuple[bool, str]:

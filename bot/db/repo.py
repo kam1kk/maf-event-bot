@@ -141,6 +141,16 @@ async def get_user(tg_id: int) -> User | None:
         return await s.get(User, tg_id)
 
 
+async def get_nicks(tg_ids) -> dict[int, str]:
+    """Сохранённые ники по tg_id — чтобы показать, кто записал друга."""
+    ids = list(tg_ids)
+    if not ids:
+        return {}
+    async with S() as s:
+        result = await s.execute(select(User.tg_id, User.nick).where(User.tg_id.in_(ids)))
+        return {row[0]: row[1] for row in result.all() if row[1]}
+
+
 async def get_or_create_user(tg_id: int) -> User:
     async with S() as s:
         user = await s.get(User, tg_id)
