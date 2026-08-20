@@ -232,6 +232,19 @@ def test_parsers():
     assert parse_time("19:00") == time(19, 0)
     assert parse_time("9.30") == time(9, 30)
     assert parse_time("25:00") is None
+    # свободный ввод времени
+    assert parse_time("21") == time(21, 0)
+    assert parse_time("21.00") == time(21, 0)
+    assert parse_time("21 15") == time(21, 15)
+    assert parse_time("21-15") == time(21, 15)
+    assert parse_time(" 21 : 15 ") == time(21, 15)
+    assert parse_time("2115") == time(21, 15)
+    assert parse_time("930") == time(9, 30)
+    assert parse_time("9:5") == time(9, 5)
+    assert parse_time("24") is None
+    assert parse_time("21:75") is None
+    assert parse_time("21 15 30") is None
+    assert parse_time("вечером") is None
 
     d = parse_date("01.01")
     assert d is not None and d >= today()
