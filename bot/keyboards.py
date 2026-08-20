@@ -100,6 +100,7 @@ def manage_keyboard(event: Event) -> InlineKeyboardMarkup:
         ],
         [InlineKeyboardButton(text=remind_label, callback_data=f"mng:{e}:remind")],
         [InlineKeyboardButton(text="👥 Выписать участника", callback_data=f"mng:{e}:kick")],
+        [InlineKeyboardButton(text="🕵 Кто записал друзей", callback_data=f"mng:{e}:guests")],
         [InlineKeyboardButton(text="❌ Отменить стол", callback_data=f"mng:{e}:cancel")],
         [InlineKeyboardButton(text="✔ Готово", callback_data=f"mng:{e}:close")],
     ])

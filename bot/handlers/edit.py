@@ -9,7 +9,7 @@ from aiogram.types import CallbackQuery, Message
 from bot import keyboards as kb
 from bot.db import repo
 from bot.services import membership, pin, roster, scheduler
-from bot.services.render import render_summary
+from bot.services.render import render_guests, render_summary
 from bot.utils import fmt_date, fmt_time, parse_date, parse_time
 
 router = Router()
@@ -136,6 +136,13 @@ async def cb_manage_action(callback: CallbackQuery, state: FSMContext, bot: Bot)
         await callback.message.edit_text(
             "Кого выписать? Нажмите на участника:",
             reply_markup=kb.kick_keyboard(event_id, regs),
+        )
+    elif action == "guests":
+        # кто записал каждого друга — видно только создателю и админам бота
+        regs = await repo.get_regs(event_id)
+        await callback.message.edit_text(
+            f"{render_summary(event)}\n\n{render_guests(regs, await roster.guest_author_names(regs))}",
+            reply_markup=kb.back_to_manage_keyboard(event_id),
         )
     elif action == "menu":
         # «Назад» из любого шага ввода: сбрасываем ожидание текста

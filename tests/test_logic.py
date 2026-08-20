@@ -11,7 +11,7 @@ def test_smoke(tmp_path):
     from bot.config import settings
     from bot.db import repo
     from bot.db.models import init_db
-    from bot.services.render import render_event
+    from bot.services.render import render_event, render_guests
     from bot.utils import parse_date, parse_time, today
 
     # config читает DB_PATH при импорте — если модуль уже импортирован другим тестом,
@@ -141,11 +141,36 @@ def test_smoke(tmp_path):
         # друг «через /» — обычный гость для выписки и /my
         assert any(g.id == slash.id for g in await repo.get_guest_regs(event.id, 2))
         assert len(await repo.list_user_regs_on_active(2)) == 3  # своя + гость + «через /»
+        # кто записал друга: имя берётся из записи записавшего на этом же столе
+        from bot.services.roster import guest_author_names
+        regs = await repo.get_regs(event.id)
+        names = await guest_author_names(regs)
+        assert names[2] == "Nick2"
+        text = render_guests(regs, names)
+        assert '<b>ДругВася</b> — записал <a href="tg://user?id=2">Nick2</a>' in text
+        assert '<b>SlashBro</b> (через /) — записал <a href="tg://user?id=2">Nick2</a>' in text
+
         # хозяин выписался — друг не исчезает, а становится отдельной строкой
         await repo.delete_reg(own2.id)
         text = render_event(event, await repo.get_regs(event.id))
         assert "SlashBro" in text and "/SlashBro" not in text
         assert (await repo.get_reg_by_id(slash.id)).attached_to is None
+
+        # записавший выписался сам: друг стал самостоятельной записью, но видно,
+        # что записал его тот же человек — имя берётся из сохранённого ника
+        await repo.set_nick(2, "Nick2")
+        regs = await repo.get_regs(event.id)
+        names = await guest_author_names(regs)
+        assert names[2] == "Nick2"
+        text = render_guests(regs, names)
+        assert '<b>SlashBro</b> — записал <a href="tg://user?id=2">Nick2</a>' in text
+        assert "(через /)" not in text
+        # записавший без сохранённого ника — показываем по id
+        await repo.add_reg(event.id, None, 777, "Гость777")
+        regs = await repo.get_regs(event.id)
+        text = render_guests(regs, await guest_author_names(regs))
+        assert "<b>Гость777</b> — записал id 777" in text
+        assert render_guests([], {}).startswith("Друзей")
 
         # отвязка тем: /unbind чистит тему мероприятий, /unbind_remind — тему напоминаний
         await repo.bind_type_remind(et.id, GROUP, 77)
