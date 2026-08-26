@@ -154,3 +154,156 @@ def test_arrive_time_must_be_after_start(tmp_path):
         assert (await repo.get_reg_by_id(reg.id)).leave_time == time(19, 0)
 
     asyncio.run(run())
+
+
+class FakeBot:
+    """Ловит последнюю перерисовку сообщения события; в группе никто не Telegram-админ."""
+
+    def __init__(self):
+        self.markup = "не вызывался"
+
+    async def edit_message_text(self, text, chat_id=None, message_id=None,
+                                reply_markup=None, **kwargs):
+        self.markup = reply_markup
+
+    async def get_chat_member(self, chat_id, user_id):
+        raise RuntimeError("чат недоступен")
+
+    async def pin_chat_message(self, chat_id, message_id, disable_notification=None):
+        return True
+
+    async def unpin_chat_message(self, chat_id, message_id=None):
+        return True
+
+
+class FakeCallback:
+    """Нажатие на инлайн-кнопку: помнит ответ бота."""
+
+    def __init__(self, data: str, user_id: int):
+        self.data = data
+        self.from_user = type("U", (), {"id": user_id})()
+        self.replies: list[str] = []
+
+    async def answer(self, text=None, show_alert=False, url=None):
+        self.replies.append(text)
+
+
+def test_restore_button_expires_with_the_day(tmp_path):
+    """Кнопку «Восстановить стол» видно только пока идёт день игры: время позже
+    начала — ещё можно, наступил следующий день — уже нет. Кто отменил, роли не играет."""
+    _prepare(tmp_path, "restore.db")
+
+    from datetime import datetime, timedelta
+
+    from bot.db import repo
+    from bot.db.models import init_db
+    from bot.services import roster
+
+    GROUP = -1001234567890
+    CREATOR, ADMIN = 1, 777
+
+    async def run():
+        await init_db()
+        await repo.ensure_group(GROUP, "Тестовая группа")
+        await repo.set_group_timezone(GROUP, "Europe/Moscow")
+        await repo.ensure_default_type(GROUP)
+        et = (await repo.list_types(GROUP))[0]
+        tz = await repo.group_tz(GROUP)
+        today = datetime.now(tz).date()
+
+        async def make(day, cancelled_by=CREATOR, status="cancelled"):
+            event = await repo.create_event(
+                type_id=et.id, type_name=et.name, date_=day, time_=time(9, 0),
+                place="Клуб", host="Иван", creator_id=CREATOR,
+                chat_id=GROUP, topic_id=42, message_id=100,
+            )
+            return await repo.update_event(event.id, status=status, cancelled_by=cancelled_by)
+
+        # стол сегодня: начало уже прошло (9:00), но день ещё идёт — восстановить можно
+        todays = await make(today)
+        assert await roster.restore_allowed(todays)
+
+        # наступил следующий день — восстановление закрыто
+        yesterdays = await make(today - timedelta(days=1))
+        assert not await roster.restore_allowed(yesterdays)
+
+        # кто отменил — неважно: стол админа тоже возвращается в день игры
+        by_admin = await make(today, cancelled_by=ADMIN)
+        assert await roster.restore_allowed(by_admin)
+        assert not await roster.restore_allowed(await make(today - timedelta(days=1),
+                                                           cancelled_by=ADMIN))
+
+        # активный стол кнопки восстановления не получает
+        active = await make(today, cancelled_by=None, status="active")
+        assert not await roster.restore_allowed(active)
+
+        # в самом сообщении: сегодня — кнопка есть, вчера — клавиатуры нет
+        bot = FakeBot()
+        await roster.refresh_event_message(bot, todays.id)
+        assert bot.markup is not None and "rst:" in bot.markup.inline_keyboard[0][0].callback_data
+        await roster.refresh_event_message(bot, yesterdays.id)
+        assert bot.markup is None
+
+    asyncio.run(run())
+
+
+def test_admin_can_restore_cancelled_table(tmp_path):
+    """Восстановить стол может и создатель, и админ бота — независимо от того,
+    кто его отменил. Посторонний участник — нет."""
+    _prepare(tmp_path, "restore_rights.db")
+
+    from datetime import datetime, timedelta
+
+    from bot.db import repo
+    from bot.db.models import init_db
+    from bot.handlers.edit import cb_restore
+
+    GROUP = -1001234567890
+    CREATOR, ADMIN, STRANGER = 1, 777, 500
+
+    async def run():
+        await init_db()
+        await repo.ensure_group(GROUP, "Тестовая группа")
+        await repo.set_group_timezone(GROUP, "Europe/Moscow")
+        await repo.ensure_default_type(GROUP)
+        await repo.add_group_admin(GROUP, ADMIN, "Админ", CREATOR)
+        et = (await repo.list_types(GROUP))[0]
+        tz = await repo.group_tz(GROUP)
+        today = datetime.now(tz).date()
+        bot = FakeBot()
+
+        async def cancelled(day, by):
+            event = await repo.create_event(
+                type_id=et.id, type_name=et.name, date_=day, time_=time(9, 0),
+                place="Клуб", host="Иван", creator_id=CREATOR,
+                chat_id=GROUP, topic_id=42, message_id=100,
+            )
+            return await repo.update_event(event.id, status="cancelled", cancelled_by=by)
+
+        async def press(event, user_id):
+            callback = FakeCallback(f"rst:{event.id}", user_id)
+            await cb_restore(callback, bot)
+            return callback.replies[-1]
+
+        # отменил админ — создатель откатывает
+        event = await cancelled(today, ADMIN)
+        assert "восстановлен" in await press(event, CREATOR)
+        assert (await repo.get_event(event.id)).status == "active"
+
+        # отменил создатель — админ откатывает
+        event = await cancelled(today, CREATOR)
+        assert "восстановлен" in await press(event, ADMIN)
+        assert (await repo.get_event(event.id)).status == "active"
+
+        # посторонний участник кнопкой не пользуется
+        event = await cancelled(today, CREATOR)
+        assert "создатель или админ бота" in await press(event, STRANGER)
+        assert (await repo.get_event(event.id)).status == "cancelled"
+
+        # день прошёл — отказ даже админу, кнопка из сообщения убирается
+        event = await cancelled(today - timedelta(days=1), CREATOR)
+        assert "уже прошёл" in await press(event, ADMIN)
+        assert (await repo.get_event(event.id)).status == "cancelled"
+        assert bot.markup is None
+
+    asyncio.run(run())

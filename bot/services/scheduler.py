@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, time, timedelta
+from datetime import datetime, timedelta
 from html import escape
 
 from aiogram import Bot
@@ -9,7 +9,7 @@ from bot.config import get_tz
 from bot.db import repo
 from bot.db.models import Event
 from bot.services import pin, roster
-from bot.utils import fmt_time, message_link
+from bot.utils import day_end, fmt_time, message_link
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,7 @@ def setup(bot: Bot) -> None:
 
 def _close_at(event: Event, tz) -> datetime:
     # конец дня проведения: полночь следующего дня по времени группы
-    return datetime.combine(event.date_ + timedelta(days=1), time(0, 0), tzinfo=tz)
+    return day_end(event.date_, tz)
 
 
 def _remind_at(event: Event, tz) -> datetime:
@@ -49,8 +49,19 @@ async def schedule_event_jobs(event: Event) -> None:
         )
 
 
+async def schedule_restore_expiry(event: Event) -> None:
+    """Отменённый стол: в полночь убираем из сообщения кнопку «Восстановить стол»."""
+    tz = await repo.group_tz(event.chat_id)
+    expire_at = _close_at(event, tz)
+    if expire_at > datetime.now(tz):
+        scheduler.add_job(
+            expire_restore, "date", run_date=expire_at,
+            id=f"restore:{event.id}", args=[event.id], replace_existing=True,
+        )
+
+
 def cancel_event_jobs(event_id: int) -> None:
-    for prefix in ("close", "remind"):
+    for prefix in ("close", "remind", "restore"):
         job = scheduler.get_job(f"{prefix}:{event_id}")
         if job:
             job.remove()
@@ -60,6 +71,8 @@ async def reschedule(event: Event) -> None:
     cancel_event_jobs(event.id)
     if event.status == "active":
         await schedule_event_jobs(event)
+    elif event.status == "cancelled":
+        await schedule_restore_expiry(event)
 
 
 async def close_event(event_id: int) -> None:
@@ -70,6 +83,14 @@ async def close_event(event_id: int) -> None:
     await roster.refresh_event_message(_bot, event_id)
     await pin.refresh_for_event(_bot, event)
     logger.info("Запись на событие %s закрыта (конец дня проведения)", event_id)
+
+
+async def expire_restore(event_id: int) -> None:
+    event = await repo.get_event(event_id)
+    if not event or event.status != "cancelled":
+        return
+    await roster.refresh_event_message(_bot, event_id)
+    logger.info("Восстановление события %s больше недоступно (день проведения прошёл)", event_id)
 
 
 async def send_reminder(event_id: int) -> None:
@@ -116,3 +137,10 @@ async def restore_jobs() -> None:
     # пины могли устареть, пока бот лежал (или ещё не расставлялись — первый запуск версии)
     for chat_id, topic_id in topics:
         await pin.refresh_topic_pin(_bot, chat_id, topic_id)
+    # отменённые столы: либо ждём полуночи, либо она уже прошла и кнопку пора убрать
+    for event in await repo.list_cancelled_events(datetime.now(get_tz()).date() - timedelta(days=2)):
+        tz = await repo.group_tz(event.chat_id)
+        if _close_at(event, tz) <= datetime.now(tz):
+            await roster.refresh_event_message(_bot, event.id)
+        else:
+            await schedule_restore_expiry(event)
