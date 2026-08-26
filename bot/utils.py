@@ -1,5 +1,5 @@
 import re
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 
 from bot.config import get_tz
 
@@ -14,6 +14,11 @@ TIME_H_RE = re.compile(r"(\d{1,2})")
 
 def today() -> date:
     return datetime.now(get_tz()).date()
+
+
+def day_end(d: date, tz) -> datetime:
+    """Момент, когда день d считается прошедшим, — полночь следующего дня."""
+    return datetime.combine(d + timedelta(days=1), time(0, 0), tzinfo=tz)
 
 
 def parse_date(text: str, base: date | None = None) -> date | None:

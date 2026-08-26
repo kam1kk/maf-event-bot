@@ -1,4 +1,4 @@
-from datetime import time
+from datetime import date, time
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import and_, delete, or_, select, update
@@ -306,6 +306,15 @@ async def list_active_events(chat_id: int | None = None) -> list[Event]:
         query = select(Event).where(Event.status == "active")
         if chat_id is not None:
             query = query.where(Event.chat_id == chat_id)
+        result = await s.execute(query.order_by(Event.date_, Event.time_))
+        return list(result.scalars().all())
+
+
+async def list_cancelled_events(since: date) -> list[Event]:
+    """Отменённые мероприятия не старше указанной даты — те, у которых кнопка
+    «Восстановить стол» ещё могла быть активной."""
+    async with S() as s:
+        query = select(Event).where(Event.status == "cancelled", Event.date_ >= since)
         result = await s.execute(query.order_by(Event.date_, Event.time_))
         return list(result.scalars().all())
 

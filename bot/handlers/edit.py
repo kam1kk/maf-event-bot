@@ -10,7 +10,7 @@ from bot import keyboards as kb
 from bot.db import repo
 from bot.services import membership, pin, roster, scheduler
 from bot.services.render import render_guests, render_summary
-from bot.utils import fmt_date, fmt_time, parse_date, parse_time
+from bot.utils import day_end, fmt_date, fmt_time, parse_date, parse_time
 
 router = Router()
 
@@ -304,12 +304,13 @@ async def cb_cancel_confirm(callback: CallbackQuery, bot: Bot) -> None:
         event_id, status="cancelled", cancelled_by=callback.from_user.id
     )
     scheduler.cancel_event_jobs(event_id)
+    await scheduler.schedule_restore_expiry(event)
     await roster.refresh_event_message(bot, event_id)
     await pin.refresh_for_event(bot, event)
-    note = "Стол отменен ❌"
-    if callback.from_user.id == event.creator_id:
-        note += "\nПередумаете — под сообщением в теме есть кнопка «♻ Восстановить стол»."
-    await callback.message.edit_text(note)
+    await callback.message.edit_text(
+        "Стол отменен ❌\n"
+        "Передумаете — под сообщением в теме есть кнопка «♻ Восстановить стол»."
+    )
     await callback.answer()
 
 
@@ -320,22 +321,20 @@ async def cb_restore(callback: CallbackQuery, bot: Bot) -> None:
     if not event or event.status != "cancelled":
         await callback.answer("Мероприятие не найдено или не отменено", show_alert=True)
         return
-    if callback.from_user.id != event.creator_id:
-        await callback.answer("Восстановить стол может только его создатель", show_alert=True)
-        return
-    if event.cancelled_by is not None and event.cancelled_by != event.creator_id:
+    if not await _can_manage(bot, event, callback.from_user.id):
         await callback.answer(
-            "Стол отменён админом — восстановление недоступно", show_alert=True
+            "Восстановить стол может его создатель или админ бота", show_alert=True
         )
         return
     # день игры уже закончился — восстанавливать нечего
     tz = await repo.group_tz(event.chat_id)
-    if datetime.combine(event.date_ + timedelta(days=1), datetime.min.time(), tzinfo=tz) <= datetime.now(tz):
+    if datetime.now(tz) >= day_end(event.date_, tz):
         await callback.answer("День этого мероприятия уже прошёл", show_alert=True)
+        await roster.refresh_event_message(bot, event_id)  # убираем протухшую кнопку
         return
 
     event = await repo.update_event(event_id, status="active", cancelled_by=None)
     await roster.refresh_event_message(bot, event_id)
-    await scheduler.schedule_event_jobs(event)
+    await scheduler.reschedule(event)  # снимает ожидание полуночи, ставит закрытие и напоминание
     await pin.refresh_for_event(bot, event)
     await callback.answer("Стол восстановлен ✅ Запись снова открыта")

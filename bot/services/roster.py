@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from collections import defaultdict
+from datetime import datetime
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest
@@ -9,11 +10,21 @@ from aiogram.types import LinkPreviewOptions
 from bot.db import repo
 from bot.keyboards import event_keyboard, restore_keyboard
 from bot.services.render import render_event
+from bot.utils import day_end
 
 logger = logging.getLogger(__name__)
 
 # сериализуем правки одного сообщения: два одновременных нажатия не потеряют записи
 _locks: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
+
+
+async def restore_allowed(event) -> bool:
+    """Отменённый стол можно вернуть, пока идёт день игры: после полуночи
+    восстанавливать уже нечего. Кто именно отменил — неважно."""
+    if event.status != "cancelled":
+        return False
+    tz = await repo.group_tz(event.chat_id)
+    return datetime.now(tz) < day_end(event.date_, tz)
 
 
 async def refresh_event_message(bot: Bot, event_id: int) -> None:
@@ -27,10 +38,7 @@ async def refresh_event_message(bot: Bot, event_id: int) -> None:
         if event.status == "active":
             has_guests = any(r.user_id is None for r in regs)
             keyboard = event_keyboard(event.id, has_guests)
-        elif event.status == "cancelled" and (
-            event.cancelled_by is None or event.cancelled_by == event.creator_id
-        ):
-            # отменённый самим создателем стол можно вернуть
+        elif await restore_allowed(event):
             keyboard = restore_keyboard(event.id)
         try:
             await bot.edit_message_text(
