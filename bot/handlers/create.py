@@ -137,6 +137,16 @@ async def start_from_deeplink(message: Message, state: FSMContext, bot: Bot, arg
         await _show_types(message, state, group_chat_id, edit=False)
 
 
+async def _own_nick(tg_id: int) -> str | None:
+    user = await repo.get_user(tg_id)
+    return user.nick if user else None
+
+
+async def _set_host(state: FSMContext, host: str) -> None:
+    await state.update_data(host=host)
+    await state.set_state(CreateForm.confirm)
+
+
 def _preview_text(data: dict) -> str:
     return (
         "Проверьте мероприятие:\n\n"
@@ -266,7 +276,10 @@ async def input_place(message: Message, state: FSMContext) -> None:
         return
     await state.update_data(place=place)
     await state.set_state(CreateForm.host)
-    await message.answer("Введите имя ведущего игр:", reply_markup=kb.cancel_create_keyboard())
+    await message.answer(
+        "Введите имя ведущего игр:",
+        reply_markup=kb.host_keyboard(await _own_nick(message.from_user.id)),
+    )
 
 
 @router.message(CreateForm.host, F.text)
@@ -275,10 +288,22 @@ async def input_host(message: Message, state: FSMContext) -> None:
     if not host or len(host) > 64:
         await message.answer("Слишком длинно (максимум 64 символа). Введите имя ведущего:")
         return
-    await state.update_data(host=host)
-    await state.set_state(CreateForm.confirm)
+    await _set_host(state, host)
     data = await state.get_data()
     await message.answer(_preview_text(data), reply_markup=kb.confirm_keyboard())
+
+
+@router.callback_query(CreateForm.host, F.data == "host:self")
+async def cb_host_self(callback: CallbackQuery, state: FSMContext) -> None:
+    """«Веду сам» — подставляем игровой ник из профиля."""
+    nick = await _own_nick(callback.from_user.id)
+    if not nick:
+        await callback.answer("Игровой ник не задан — отправьте /nick или введите имя вручную", show_alert=True)
+        return
+    await _set_host(state, nick)
+    data = await state.get_data()
+    await callback.message.edit_text(_preview_text(data), reply_markup=kb.confirm_keyboard())
+    await callback.answer()
 
 
 @router.callback_query(CreateForm.confirm, F.data == "cform:publish")
