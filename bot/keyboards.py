@@ -65,6 +65,18 @@ def cancel_create_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
+def host_keyboard(
+    nick: str | None, cancel_cb: str = "cform:cancel", cancel_text: str = "✖ Отмена"
+) -> InlineKeyboardMarkup:
+    """Шаг «ведущий»: кнопка со своим игровым ником — чтобы не набирать его руками.
+    Ника нет — кнопки нет, остаётся только ручной ввод."""
+    rows = []
+    if nick:
+        rows.append([InlineKeyboardButton(text=f"🎤 {nick}", callback_data="host:self")])
+    rows.append([InlineKeyboardButton(text=cancel_text, callback_data=cancel_cb)])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def back_to_manage_keyboard(event_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="« Назад", callback_data=f"mng:{event_id}:menu")],

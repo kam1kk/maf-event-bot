@@ -120,9 +120,14 @@ async def cb_manage_action(callback: CallbackQuery, state: FSMContext, bot: Bot)
     elif action == "host":
         await state.set_state(EditForm.host)
         await state.update_data(event_id=event_id)
+        user = await repo.get_user(callback.from_user.id)
         await callback.message.edit_text(
             "Введите нового ведущего:",
-            reply_markup=kb.back_to_manage_keyboard(event_id),
+            reply_markup=kb.host_keyboard(
+                user.nick if user else None,
+                cancel_cb=f"mng:{event_id}:menu",
+                cancel_text="« Назад",
+            ),
         )
     elif action == "remind":
         event = await repo.update_event(event_id, remind_enabled=not event.remind_enabled)
@@ -238,16 +243,33 @@ async def input_edit_place(message: Message, state: FSMContext, bot: Bot) -> Non
     await _after_edit(bot, message, data["event_id"], f"Место изменено: <b>{escape(place)}</b> ✅")
 
 
+async def _save_host(bot: Bot, message: Message, state: FSMContext, host: str) -> None:
+    data = await state.get_data()
+    await state.clear()
+    await repo.update_event(data["event_id"], host=host)
+    await _after_edit(bot, message, data["event_id"], f"Ведущий изменён: <b>{escape(host)}</b> ✅")
+
+
 @router.message(EditForm.host, F.text, F.chat.type == "private")
 async def input_edit_host(message: Message, state: FSMContext, bot: Bot) -> None:
     host = message.text.strip()
     if not host or len(host) > 64:
         await message.answer("Слишком длинно (максимум 64 символа). Введите ведущего:")
         return
-    data = await state.get_data()
-    await state.clear()
-    await repo.update_event(data["event_id"], host=host)
-    await _after_edit(bot, message, data["event_id"], f"Ведущий изменён: <b>{escape(host)}</b> ✅")
+    await _save_host(bot, message, state, host)
+
+
+@router.callback_query(EditForm.host, F.data == "host:self")
+async def cb_edit_host_self(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
+    """«Веду сам» — подставляем игровой ник из профиля."""
+    user = await repo.get_user(callback.from_user.id)
+    if not user or not user.nick:
+        await callback.answer(
+            "Игровой ник не задан — отправьте /nick или введите имя вручную", show_alert=True
+        )
+        return
+    await _save_host(bot, callback.message, state, user.nick)
+    await callback.answer()
 
 
 @router.callback_query(F.data.startswith("kick:"))
