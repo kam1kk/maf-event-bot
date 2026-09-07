@@ -18,11 +18,27 @@ from bot.commands import ADMIN_COMMANDS, set_member_hints
 from bot.config import settings
 from bot.db import repo
 from bot.db.models import init_db
-from bot.handlers import create, edit, group, profile
+from bot.handlers import create, edit, group, guard, profile
 from bot.handlers import settings as settings_handlers
 from bot.services import scheduler as sched
 
 logger = logging.getLogger(__name__)
+
+
+def build_dispatcher(storage=None) -> Dispatcher:
+    """Порядок роутеров важен: guard идёт первым и отвечает на команду,
+    отправленную вместо значения. Пусти его ниже — и /new, /my, /settings
+    разберут свои хендлеры, а форма молча пропадёт."""
+    dp = Dispatcher(storage=storage or MemoryStorage())
+    dp.include_routers(
+        guard.router,
+        profile.router,
+        create.router,
+        edit.router,
+        settings_handlers.router,
+        group.router,
+    )
+    return dp
 
 
 async def main() -> None:
@@ -50,14 +66,7 @@ async def main() -> None:
     logger.info("Групп: %d, часовой пояс по умолчанию: %s", len(groups), config.get_tz())
 
     bot = Bot(settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-    dp = Dispatcher(storage=MemoryStorage())
-    dp.include_routers(
-        profile.router,
-        create.router,
-        edit.router,
-        settings_handlers.router,
-        group.router,
-    )
+    dp = build_dispatcher()
 
     await bot.set_my_commands(
         [
