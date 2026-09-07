@@ -8,7 +8,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from bot.config import get_tz
 from bot.db import repo
 from bot.db.models import Event
-from bot.services import pin, roster
+from bot.services import notify, pin, roster
 from bot.utils import day_end, fmt_time, message_link
 
 logger = logging.getLogger(__name__)
@@ -97,11 +97,7 @@ async def send_reminder(event_id: int) -> None:
     event = await repo.get_event(event_id)
     if not event or event.status != "active" or not event.remind_enabled:
         return
-    event_type = await repo.get_type(event.type_id)
-    if event_type and event_type.remind_chat_id:
-        chat_id, topic_id = event_type.remind_chat_id, event_type.remind_topic_id
-    else:
-        chat_id, topic_id = event.chat_id, event.topic_id
+    chat_id, topic_id = await notify.remind_target(event)
     if not chat_id:
         return
 

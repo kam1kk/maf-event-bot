@@ -9,6 +9,7 @@ from aiogram.types import LinkPreviewOptions
 
 from bot.db import repo
 from bot.keyboards import event_keyboard, restore_keyboard
+from bot.services import notify
 from bot.services.render import render_event
 from bot.utils import day_end
 
@@ -51,6 +52,8 @@ async def refresh_event_message(bot: Bot, event_id: int) -> None:
         except TelegramBadRequest as e:
             if "message is not modified" not in str(e):
                 logger.warning("Не удалось обновить сообщение события %s: %s", event_id, e)
+    # общая точка всех изменений состава: здесь же ловим момент, когда он собрался
+    await notify.roster_filled(bot, event, regs)
 
 
 async def guest_author_names(regs: list) -> dict[int, str]:

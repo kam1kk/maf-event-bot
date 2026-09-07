@@ -86,6 +86,8 @@ class Event(Base):
     remind_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     # кто отменил стол; восстановление доступно, только если отменил сам создатель
     cancelled_by: Mapped[int | None] = mapped_column(BigInteger)
+    # уведомление «состав собран» уже отправлено — шлём его один раз на стол
+    full_notified: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class Registration(Base):
@@ -158,6 +160,10 @@ async def init_db() -> None:
         columns = [row[1] for row in result.fetchall()]
         if columns and "cancelled_by" not in columns:
             await conn.exec_driver_sql("ALTER TABLE events ADD COLUMN cancelled_by BIGINT")
+        if columns and "full_notified" not in columns:
+            await conn.exec_driver_sql(
+                "ALTER TABLE events ADD COLUMN full_notified BOOLEAN DEFAULT 0"
+            )
         result = await conn.exec_driver_sql("PRAGMA table_info(groups)")
         columns = [row[1] for row in result.fetchall()]
         if columns and "only_admins_create" not in columns:
