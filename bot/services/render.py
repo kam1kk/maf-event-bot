@@ -28,16 +28,23 @@ def reg_line(reg: Registration, attached: list[Registration] | None = None) -> s
     return " ".join(parts)
 
 
-def render_event(event: Event, regs: list[Registration]) -> str:
+def split_roster(regs: list[Registration]) -> tuple[list[Registration], dict[int, list[Registration]]]:
+    """Строки состава и прицепленные к ним друзья «через /»: такой друг сидит
+    в строке хозяина и своего места не занимает. Хозяин мог быть удалён напрямую
+    в БД — тогда гость показывается своей строкой."""
     ids = {r.id for r in regs}
     attached: dict[int, list[Registration]] = {}
     hosts: list[Registration] = []
     for r in regs:
-        # хозяин мог быть удалён напрямую в БД — тогда гость показывается своей строкой
         if r.attached_to is not None and r.attached_to in ids:
             attached.setdefault(r.attached_to, []).append(r)
         else:
             hosts.append(r)
+    return hosts, attached
+
+
+def render_event(event: Event, regs: list[Registration]) -> str:
+    hosts, attached = split_roster(regs)
     main = [r for r in hosts if r.category == "main"]
     late = [r for r in hosts if r.category == "late"]
 

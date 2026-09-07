@@ -301,6 +301,20 @@ async def update_event(event_id: int, **fields) -> Event | None:
         return event
 
 
+async def mark_full_notified(event_id: int) -> bool:
+    """Ставит отметку «уведомление о полном составе отправлено» и возвращает True
+    только тому, кто поставил её первым: две одновременные записи не продублируют
+    сообщение в чат."""
+    async with S() as s:
+        result = await s.execute(
+            update(Event)
+            .where(Event.id == event_id, Event.full_notified.is_(False))
+            .values(full_notified=True)
+        )
+        await s.commit()
+        return result.rowcount == 1
+
+
 async def list_active_events(chat_id: int | None = None) -> list[Event]:
     async with S() as s:
         query = select(Event).where(Event.status == "active")
