@@ -1,4 +1,5 @@
 import re
+from collections.abc import Iterable
 from datetime import date, datetime, time, timedelta
 
 from bot.config import get_tz
@@ -88,3 +89,65 @@ def clean_nick(text: str) -> str | None:
     if not nick or len(nick) > 32:
         return None
     return nick
+
+
+# ---------- площадки: «Лофт», «Loft» и «LOFT» — одно место ----------
+
+# кириллица → латиница: названия, набранные в разных раскладках, сравниваются
+# в одном алфавите
+_CYRILLIC = {
+    "а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e", "ё": "e", "ж": "zh",
+    "з": "z", "и": "i", "й": "y", "к": "k", "л": "l", "м": "m", "н": "n", "о": "o",
+    "п": "p", "р": "r", "с": "s", "т": "t", "у": "u", "ф": "f", "х": "h", "ц": "ts",
+    "ч": "ch", "ш": "sh", "щ": "sh", "ъ": "", "ы": "y", "ь": "", "э": "e", "ю": "yu",
+    "я": "ya",
+}
+_TRANSLIT = str.maketrans(_CYRILLIC)
+# разные латинские записи одного звука сводим к одной: «Цирк», «Cirk» и «Tsirk» —
+# один ключ. Порядок важен: «ya» раньше «ia», иначе «Мафия» (mafiya → mafia → mafa)
+# и «Mafia» (mafa) разойдутся
+_FOLDS = (
+    ("shch", "sh"), ("sch", "sh"), ("tch", "ch"), ("dzh", "j"), ("kh", "h"),
+    ("ts", "c"), ("tz", "c"), ("ck", "k"), ("ph", "f"), ("th", "t"),
+    ("yu", "u"), ("ju", "u"), ("iu", "u"),
+    ("ya", "a"), ("ja", "a"), ("ia", "a"),
+    ("ye", "e"), ("je", "e"), ("ie", "e"),
+    ("yo", "e"), ("jo", "e"),
+    ("oo", "u"), ("w", "v"), ("q", "k"), ("x", "ks"), ("y", "i"), ("j", "i"),
+)
+# латинская «c» — это «k» («Club» → klub), кроме «ch» и мягкой позиции перед
+# e/i, где она читается как «ц» («Cirk» → cirk, как и «Цирк» → tsirk → cirk)
+_HARD_C_RE = re.compile(r"c(?![hiec])")
+# удвоенные буквы — одна («Hall» → hal), цифры не трогаем: «Ленина 55» ≠ «Ленина 5»
+_REPEAT_RE = re.compile(r"(\D)\1+")
+
+
+def place_key(text: str) -> str:
+    """Ключ сравнения площадок: без регистра, пробелов и знаков препинания,
+    кириллица переведена в латиницу, разночтения транслитерации сведены.
+    «Лофт», «Loft», «LOFT», «Кафе «Лофт»» и «Cafe Loft» дают один ключ."""
+    key = text.casefold().translate(_TRANSLIT)
+    key = "".join(ch for ch in key if ch.isalnum())
+    if not key:
+        # одни знаки — сравниваем как есть, чтобы «???» и «!!!» не склеились
+        return " ".join(text.casefold().split())
+    for old, new in _FOLDS:
+        key = key.replace(old, new)
+    key = _HARD_C_RE.sub("k", key)
+    return _REPEAT_RE.sub(r"\1", key)
+
+
+def resolve_place(text: str, known: Iterable[str]) -> str:
+    """Каким написанием сохранять введённую площадку с оглядкой на те, что
+    пользователь вводил раньше (known — от недавних к старым).
+
+    Совпало с известной с точностью до регистра («LOFT» при известной «Loft») —
+    берётся новое написание: последнее слово за последним вводом, так регистр
+    можно поправить. Совпало только по ключу — другой алфавит или знаки
+    («Лофт» при известной «Loft») — берётся известное написание. Ничего не
+    совпало — ввод как есть."""
+    key = place_key(text)
+    for place in known:
+        if place_key(place) == key:
+            return text if place.casefold() == text.casefold() else place
+    return text

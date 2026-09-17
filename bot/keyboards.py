@@ -1,6 +1,6 @@
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-from bot.db.models import Event, EventType, Group, Registration
+from bot.db.models import Event, EventType, Group, Registration, UserPlace
 
 
 def group_picker_keyboard(groups: list[Group], prefix: str) -> InlineKeyboardMarkup:
@@ -73,6 +73,20 @@ def host_keyboard(
     rows = []
     if nick:
         rows.append([InlineKeyboardButton(text=f"🎤 {nick}", callback_data="host:self")])
+    rows.append([InlineKeyboardButton(text=cancel_text, callback_data=cancel_cb)])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def place_keyboard(
+    places: list[UserPlace], cancel_cb: str = "cform:cancel", cancel_text: str = "✖ Отмена"
+) -> InlineKeyboardMarkup:
+    """Шаг «место»: кнопки с площадками, которые пользователь вводил раньше
+    (от недавних к старым), — одно нажатие вместо набора. Ручной ввод остаётся:
+    новое место вводится текстом. Истории нет — только ввод и выход."""
+    rows = [
+        [InlineKeyboardButton(text=f"📍 {p.place}", callback_data=f"place:{p.id}")]
+        for p in places
+    ]
     rows.append([InlineKeyboardButton(text=cancel_text, callback_data=cancel_cb)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 

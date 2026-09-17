@@ -1,11 +1,14 @@
 import os
 from datetime import date, datetime, time, timezone
 
-from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Integer, String, Time
+from sqlalchemy import (
+    BigInteger, Boolean, Date, DateTime, ForeignKey, Integer, String, Time, select,
+)
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from bot.config import settings
+from bot.utils import place_key, resolve_place
 
 
 class Base(DeclarativeBase):
@@ -121,6 +124,21 @@ class TopicPin(Base):
     message_id: Mapped[int] = mapped_column(Integer)
 
 
+class UserPlace(Base):
+    """Площадка, которую пользователь вводил на шаге «место», — для кнопок-подсказок.
+    Одна строка на пользователя и площадку: написания, различающиеся регистром или
+    алфавитом («LOFT», «Loft», «Лофт»), — одна площадка, хранится последнее написание."""
+    __tablename__ = "user_places"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger)
+    key: Mapped[str] = mapped_column(String(256))  # utils.place_key — по нему ищем ту же площадку
+    place: Mapped[str] = mapped_column(String(128))
+    used_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None)
+    )
+
+
 engine = None
 Session: async_sessionmaker[AsyncSession] | None = None
 
@@ -146,6 +164,13 @@ async def init_db() -> None:
             if "group_chat_id" not in columns:
                 legacy_types = True
                 await conn.exec_driver_sql("ALTER TABLE event_types RENAME TO event_types_old")
+
+        # подсказки площадок (v2.13.0): таблицы ещё нет — после создания наполним
+        # её из уже опубликованных столов, чтобы список не начинался с пустого
+        result = await conn.exec_driver_sql(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='user_places'"
+        )
+        places_missing = result.fetchone() is None
 
         await conn.run_sync(Base.metadata.create_all)
 
@@ -189,3 +214,31 @@ async def init_db() -> None:
                 "WHERE group_chat_id IS NULL AND (SELECT COUNT(*) FROM groups) = 1"
             )
             await conn.exec_driver_sql("DROP TABLE event_types_old")
+
+    # отдельной транзакцией: пока открыта миграционная, вторая запись в SQLite ждёт
+    if places_missing:
+        await _backfill_places()
+
+
+async def _backfill_places() -> None:
+    """Первый запуск с таблицей user_places: наполняем её местами уже созданных
+    столов. По одной строке на пользователя и площадку, написание — по тем же
+    правилам, что при вводе; порядок строк — по последнему использованию, чтобы
+    недавние площадки встали в подсказках первыми."""
+    async with Session() as s:
+        result = await s.execute(
+            select(Event.id, Event.creator_id, Event.place).order_by(Event.id)
+        )
+        latest: dict[tuple[int, str], tuple[int, str]] = {}  # (user, key) → (event_id, place)
+        for event_id, creator_id, place in result.all():
+            if not place:
+                continue
+            key = (creator_id, place_key(place))
+            known = latest.get(key)
+            latest[key] = (event_id, resolve_place(place, [known[1]] if known else []))
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        s.add_all([
+            UserPlace(user_id=user_id, key=key, place=place, used_at=now)
+            for (user_id, key), (_, place) in sorted(latest.items(), key=lambda item: item[1][0])
+        ])
+        await s.commit()

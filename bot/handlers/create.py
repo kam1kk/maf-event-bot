@@ -147,6 +147,22 @@ async def _set_host(state: FSMContext, host: str) -> None:
     await state.set_state(CreateForm.confirm)
 
 
+async def _set_place(state: FSMContext, place: str) -> None:
+    await state.update_data(place=place)
+    await state.set_state(CreateForm.host)
+
+
+def _place_note(place: str, typed: str | None = None) -> str:
+    """Что подставилось на шаге «место»: выбор кнопкой или исправленное написание
+    («Лофт» → «Loft»). Ввод сохранён как есть — ничего не пишем."""
+    if typed == place:
+        return ""
+    note = f"Место: <b>{escape(place)}</b>"
+    if typed is not None:
+        note += " (так вы писали его раньше)"
+    return note + "\n"
+
+
 def _preview_text(data: dict) -> str:
     return (
         "Проверьте мероприятие:\n\n"
@@ -265,21 +281,41 @@ async def input_time(message: Message, state: FSMContext) -> None:
         return
     await state.update_data(time=event_time.isoformat(), time_str=fmt_time(event_time))
     await state.set_state(CreateForm.place)
-    await message.answer("Введите место проведения:", reply_markup=kb.cancel_create_keyboard())
+    places = await repo.list_places(message.from_user.id)
+    await message.answer(
+        "Выберите место проведения или введите новое:" if places else "Введите место проведения:",
+        reply_markup=kb.place_keyboard(places),
+    )
 
 
 @router.message(CreateForm.place, F.text)
 async def input_place(message: Message, state: FSMContext) -> None:
-    place = message.text.strip()
-    if not place or len(place) > 128:
+    typed = message.text.strip()
+    if not typed or len(typed) > 128:
         await message.answer("Слишком длинно (максимум 128 символов). Введите место проведения:")
         return
-    await state.update_data(place=place)
-    await state.set_state(CreateForm.host)
+    # «Лофт» при известной «Loft» — в стол уходит «Loft»
+    place = await repo.resolve_place(message.from_user.id, typed)
+    await _set_place(state, place)
     await message.answer(
-        "Введите имя ведущего игр:",
+        _place_note(place, typed) + "Введите имя ведущего игр:",
         reply_markup=kb.host_keyboard(await _own_nick(message.from_user.id)),
     )
+
+
+@router.callback_query(CreateForm.place, F.data.startswith("place:"))
+async def cb_place(callback: CallbackQuery, state: FSMContext) -> None:
+    """Кнопка с прежней площадкой — подставляем её и идём к ведущему."""
+    row = await repo.get_place(int(callback.data.split(":")[1]))
+    if not row or row.user_id != callback.from_user.id:
+        await callback.answer("Площадка не найдена — введите место текстом", show_alert=True)
+        return
+    await _set_place(state, row.place)
+    await callback.message.edit_text(
+        _place_note(row.place) + "Введите имя ведущего игр:",
+        reply_markup=kb.host_keyboard(await _own_nick(callback.from_user.id)),
+    )
+    await callback.answer()
 
 
 @router.message(CreateForm.host, F.text)
@@ -331,6 +367,8 @@ async def cb_publish(callback: CallbackQuery, state: FSMContext, bot: Bot) -> No
         chat_id=event_type.chat_id,
         topic_id=event_type.topic_id,
     )
+    # площадка — в подсказки на будущее: одна строка на место, последнее написание
+    await repo.remember_place(callback.from_user.id, event.place)
     text = render_event(event, [])
     try:
         posted = await bot.send_message(

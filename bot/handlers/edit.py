@@ -113,9 +113,13 @@ async def cb_manage_action(callback: CallbackQuery, state: FSMContext, bot: Bot)
     elif action == "place":
         await state.set_state(EditForm.place)
         await state.update_data(event_id=event_id)
+        places = await repo.list_places(callback.from_user.id)
         await callback.message.edit_text(
-            "Введите новое место проведения:",
-            reply_markup=kb.back_to_manage_keyboard(event_id),
+            "Выберите новое место проведения или введите его:"
+            if places else "Введите новое место проведения:",
+            reply_markup=kb.place_keyboard(
+                places, cancel_cb=f"mng:{event_id}:menu", cancel_text="« Назад"
+            ),
         )
     elif action == "host":
         await state.set_state(EditForm.host)
@@ -231,16 +235,40 @@ async def input_edit_time(message: Message, state: FSMContext, bot: Bot) -> None
     await _after_edit(bot, message, event_id, note)
 
 
-@router.message(EditForm.place, F.text, F.chat.type == "private")
-async def input_edit_place(message: Message, state: FSMContext, bot: Bot) -> None:
-    place = message.text.strip()
-    if not place or len(place) > 128:
-        await message.answer("Слишком длинно (максимум 128 символов). Введите место:")
-        return
+async def _save_place(
+    bot: Bot, message: Message, state: FSMContext, user_id: int, place: str,
+    typed: str | None = None,
+) -> None:
     data = await state.get_data()
     await state.clear()
     await repo.update_event(data["event_id"], place=place)
-    await _after_edit(bot, message, data["event_id"], f"Место изменено: <b>{escape(place)}</b> ✅")
+    await repo.remember_place(user_id, place)
+    note = f"Место изменено: <b>{escape(place)}</b>"
+    if typed is not None and typed != place:
+        note += " (так вы писали его раньше)"
+    await _after_edit(bot, message, data["event_id"], note + " ✅")
+
+
+@router.message(EditForm.place, F.text, F.chat.type == "private")
+async def input_edit_place(message: Message, state: FSMContext, bot: Bot) -> None:
+    typed = message.text.strip()
+    if not typed or len(typed) > 128:
+        await message.answer("Слишком длинно (максимум 128 символов). Введите место:")
+        return
+    # «Лофт» при известной «Loft» — в стол уходит «Loft»
+    place = await repo.resolve_place(message.from_user.id, typed)
+    await _save_place(bot, message, state, message.from_user.id, place, typed)
+
+
+@router.callback_query(EditForm.place, F.data.startswith("place:"))
+async def cb_edit_place(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
+    """Кнопка с прежней площадкой в «⚙ Управление» → «📍 Место»."""
+    row = await repo.get_place(int(callback.data.split(":")[1]))
+    if not row or row.user_id != callback.from_user.id:
+        await callback.answer("Площадка не найдена — введите место текстом", show_alert=True)
+        return
+    await _save_place(bot, callback.message, state, callback.from_user.id, row.place)
+    await callback.answer()
 
 
 async def _save_host(bot: Bot, message: Message, state: FSMContext, host: str) -> None:

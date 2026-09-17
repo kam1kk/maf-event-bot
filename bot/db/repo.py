@@ -1,12 +1,13 @@
-from datetime import date, time
+from datetime import date, datetime, time, timezone
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import and_, delete, or_, select, update
 
+from bot import utils
 from bot.config import get_tz
 from bot.db import models
 from bot.db.models import (
-    AppSetting, Event, EventType, Group, GroupAdmin, Registration, TopicPin, User,
+    AppSetting, Event, EventType, Group, GroupAdmin, Registration, TopicPin, User, UserPlace,
 )
 
 
@@ -170,6 +171,65 @@ async def set_nick(tg_id: int, nick: str) -> None:
             s.add(user)
         user.nick = nick
         await s.commit()
+
+
+# ---------- площадки пользователя (подсказки на шаге «место») ----------
+
+# сколько прежних площадок показывать кнопками — три последних; история
+# хранится целиком, чтобы написание («Лофт» → «Loft») подстраивалось и под старые
+PLACE_SUGGESTIONS = 3
+
+
+def utcnow() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+async def list_places(user_id: int, limit: int = PLACE_SUGGESTIONS) -> list[UserPlace]:
+    """Площадки, которые пользователь вводил раньше, — от недавних к старым."""
+    async with S() as s:
+        result = await s.execute(
+            select(UserPlace)
+            .where(UserPlace.user_id == user_id)
+            .order_by(UserPlace.used_at.desc(), UserPlace.id.desc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
+
+async def get_place(place_id: int) -> UserPlace | None:
+    async with S() as s:
+        return await s.get(UserPlace, place_id)
+
+
+async def _find_place(s, user_id: int, key: str) -> UserPlace | None:
+    result = await s.execute(
+        select(UserPlace).where(UserPlace.user_id == user_id, UserPlace.key == key)
+    )
+    return result.scalars().first()
+
+
+async def resolve_place(user_id: int, text: str) -> str:
+    """Написание введённой площадки с оглядкой на прежние: «Лофт» при известной
+    «Loft» — «Loft», «LOFT» при известной «Loft» — «LOFT» (см. utils.resolve_place)."""
+    async with S() as s:
+        row = await _find_place(s, user_id, utils.place_key(text))
+    return utils.resolve_place(text, [row.place] if row else [])
+
+
+async def remember_place(user_id: int, place: str) -> UserPlace:
+    """Запоминает площадку для подсказок. Одна строка на площадку — по ключу без
+    регистра и алфавита: у знакомой обновляются написание и время использования."""
+    key = utils.place_key(place)
+    async with S() as s:
+        row = await _find_place(s, user_id, key)
+        if row:
+            row.place = utils.resolve_place(place, [row.place])
+            row.used_at = utcnow()
+        else:
+            row = UserPlace(user_id=user_id, key=key, place=place, used_at=utcnow())
+            s.add(row)
+        await s.commit()
+        return row
 
 
 # ---------- event types (в разрезе группы) ----------
